@@ -125,8 +125,10 @@ async function pIdentity() {
   drawColors();
   const field = (label, val, ph = '') => { const i = h('input', { type: 'text', value: val || '', placeholder: ph }); return { el: h('div', {}, h('label', {}, label), i), get: () => i.value }; };
   const name = field('Nombre de la marca', b.name), tit = field('Tipografía de títulos', b.fonts.titulos, 'Ej. Arial'), txt = field('Tipografía de textos', b.fonts.textos, 'Ej. Verdana');
-  const biz = ['actividad', 'telefono', 'correo', 'direccion', 'horario', 'sitio_web'].map((k) => [k, field({ actividad: 'Actividad comercial', telefono: 'Teléfono / WhatsApp', correo: 'Correo', direccion: 'Dirección', horario: 'Horario', sitio_web: 'Sitio web' }[k], b.business[k])]);
-  const soc = ['instagram', 'facebook', 'tiktok', 'youtube'].map((k) => [k, field(k[0].toUpperCase() + k.slice(1), b.socials[k], '@usuario o enlace')]);
+  const BIZ = { actividad: 'Actividad comercial', whatsapp_pedidos: 'WhatsApp de pedidos (va en las imágenes)', whatsapp_local: 'WhatsApp del local', telefono: 'Otro teléfono', correo: 'Correo', direccion: 'Dirección', horario: 'Horario', sitio_web: 'Sitio web', palabras_prohibidas: 'Palabras prohibidas en textos (separadas por coma)', nota_redaccion: 'Regla de redacción (se la damos a la IA)' };
+  const biz = Object.keys(BIZ).map((k) => [k, field(BIZ[k], b.business[k])]);
+  const SOC = { instagram_suministros: 'Instagram suministros', instagram_limpieza: 'Instagram aseo y limpieza', instagram: 'Instagram (otra cuenta)', facebook: 'Facebook', tiktok: 'TikTok', youtube: 'YouTube' };
+  const soc = Object.keys(SOC).map((k) => [k, field(SOC[k], b.socials[k], '@usuario o enlace')]);
   const style = h('textarea', { placeholder: 'Ej. limpio, profesional, fondos claros…' }, b.style); style.value = b.style;
   const save = async () => {
     try {
@@ -180,6 +182,7 @@ async function pImages() {
   const c1 = h('input', { type: 'color', id: 'c1', value: bc[0] && /^#[0-9a-f]{6}$/i.test(bc[0]) ? bc[0] : '#ffffff' }), c2 = h('input', { type: 'color', id: 'c2', value: '#dbe7ff' });
   const head = h('input', { type: 'text', id: 'headline', placeholder: 'Ej. Tóner para su impresora' }), sub = h('input', { type: 'text', id: 'subline', placeholder: 'Opcional' });
   const useLogo = h('input', { type: 'checkbox', id: 'uselogo', checked: Boolean(b?.logo), disabled: !b?.logo });
+  const useWa = h('input', { type: 'checkbox', id: 'usewa', checked: Boolean(b?.business?.whatsapp_pedidos), disabled: !b?.business?.whatsapp_pedidos });
 
   // --- asistente de textos (Ollama) ---
   const suggestOut = h('div');
@@ -202,7 +205,8 @@ async function pImages() {
     : h('div', { class: 'note', style: { marginTop: '12px' } }, `Asistente de textos no disponible: ${oll.note} Vea Conectores para instalarlo (gratis).`);
 
   const localBox = h('div', {}, h('label', {}, 'Fondo'), h('div', { class: 'row' }, bgType, c1, c2), h('label', {}, 'Titular'), head, h('label', {}, 'Texto de apoyo'), sub,
-    h('label', { class: 'row', style: { fontWeight: 400 } }, useLogo, b?.logo ? 'Incluir logo oficial' : 'Incluir logo (la marca no tiene logo cargado)'), assistant);
+    h('label', { class: 'row', style: { fontWeight: 400 } }, useLogo, b?.logo ? 'Incluir logo oficial' : 'Incluir logo (la marca no tiene logo cargado)'),
+    h('label', { class: 'row', style: { fontWeight: 400 } }, useWa, b?.business?.whatsapp_pedidos ? `Incluir WhatsApp de pedidos (${b.business.whatsapp_pedidos})` : 'Incluir WhatsApp (cárguelo en Identidad y logos)'), assistant);
 
   // --- IA de imagen local ---
   const ollModel = modelSel('oll-model', imgModels.length ? imgModels : models), ollPrompt = h('textarea', { id: 'oll-prompt', placeholder: 'Describa la imagen (escenario, estilo, luz…)' });
@@ -228,7 +232,7 @@ async function pImages() {
 
   async function generate() {
     const body = { brand_id: b?.id, provider: st.provider, source_asset_id: st.src?.id, format: fmt.value };
-    if (st.provider === 'local-compose') Object.assign(body, { bg_type: bgType.value, bg_colors: [c1.value, c2.value], headline: head.value, subline: sub.value, use_logo: useLogo.checked });
+    if (st.provider === 'local-compose') Object.assign(body, { bg_type: bgType.value, bg_colors: [c1.value, c2.value], headline: head.value, subline: sub.value, use_logo: useLogo.checked, use_whatsapp: useWa.checked });
     else if (st.provider === 'ollama-image') Object.assign(body, { model: ollModel.value, prompt: ollPrompt.value });
     else Object.assign(body, { mode: sdMode.value, prompt: sdPrompt.value, negative: sdNeg.value });
     genBtn.disabled = true; genBtn.textContent = 'Generando… (la IA local puede tardar)';

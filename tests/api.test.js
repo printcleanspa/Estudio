@@ -43,6 +43,7 @@ test.before(async () => {
       return res.end(JSON.stringify({ message: { content: JSON.stringify({ opciones: [
         { titular: 'Tóner para su impresora', apoyo: 'Consulte disponibilidad' },
         { titular: 'Oferta $9.990 hoy', apoyo: 'Solo esta semana' },            // cifra inventada → debe descartarse
+        { titular: 'Tóner original para su impresora', apoyo: 'Calidad garantizada' }, // palabra prohibida → debe descartarse
         { titular: 'Suministros para su oficina', apoyo: 'Atención a empresas' }] }) } }));
     }
     if (req.url === '/api/generate') { // NDJSON: progreso + última línea con la imagen
@@ -84,8 +85,12 @@ test('marca inicial Print Clean SPA y edición de marca', async () => {
   const list = (await api('GET', '/api/brands')).data;
   assert.equal(list.length, 1); assert.equal(list[0].name, 'Print Clean SPA');
   assert.deepEqual(list[0].colors, []); // no se inventan colores
+  const bz = list[0].business;
+  assert.equal(bz.whatsapp_pedidos, '+56 9 5820 5389'); assert.equal(bz.direccion, 'San Martín 267, Santiago Centro');
+  assert.match(bz.palabras_prohibidas, /original/); assert.equal(list[0].socials.instagram_suministros, '@printcleansuministros');
+  assert.match(list[0].style, /remolino/);
   brand = list[0];
-  const u = await api('PUT', `/api/brands/${brand.id}`, { colors: [{ name: 'Azul', hex: '#0044aa' }, { name: 'mal', hex: 'rojo' }], business: { telefono: '123' }, style: 'Limpio' });
+  const u = await api('PUT', `/api/brands/${brand.id}`, { colors: [{ name: 'Azul', hex: '#0044aa' }, { name: 'mal', hex: 'rojo' }], business: { ...brand.business, telefono: '123' }, socials: brand.socials, style: 'Limpio' });
   assert.equal(u.status, 200); assert.equal(u.data.colors.length, 1); assert.equal(u.data.business.telefono, '123');
 });
 
@@ -123,6 +128,17 @@ test('subida de producto y composición local conserva el producto y entrega el 
   assert.deepEqual([...out.data.slice(i, i + 3)], [0, 170, 0]);
 });
 
+test('imagen con WhatsApp de pedidos: el pie se dibuja y el producto sigue intacto', async () => {
+  const g = await api('POST', '/api/images/generate', { brand_id: brand.id, provider: 'local-compose', source_asset_id: productId, format: 'ig-1x1', bg_colors: ['#ffffff'], use_whatsapp: true });
+  assert.equal(g.status, 200, JSON.stringify(g.data));
+  assert.equal(g.data.meta.footer, 'WhatsApp pedidos: +56 9 5820 5389'); assert.equal(g.data.meta.productModified, false);
+  const raw = await sharp(Buffer.from(await (await api('GET', `/files/${g.data.id}`, null, { raw: true })).arrayBuffer())).raw().toBuffer({ resolveWithObject: true });
+  const dark = (y0, y1) => { let n = 0; for (let y = y0; y < y1; y++) for (let x = 0; x < raw.info.width; x++) { if (raw.data[(y * raw.info.width + x) * raw.info.channels] < 128) n++; } return n; };
+  assert.ok(dark(Math.round(1080 * 0.93), 1080) > 50, 'hay texto oscuro en el pie');
+  const none = await api('POST', '/api/images/generate', { brand_id: brand.id, provider: 'local-compose', source_asset_id: productId, format: 'ig-1x1', bg_colors: ['#ffffff'] });
+  assert.equal(none.data.meta.footer, null);
+});
+
 test('aprobación de imagen generada y validaciones', async () => {
   const gen = (await api('GET', '/api/assets?kind=generated')).data[0];
   assert.equal((await api('PATCH', `/api/assets/${gen.id}`, { status: 'approved' })).data.status, 'approved');
@@ -135,13 +151,15 @@ test('Ollama: asistente de textos (visión incluida), descarta cifras inventadas
   stubHits.length = 0;
   const r = await api('POST', '/api/ai/suggest-copy', { brand_id: brand.id, model: 'llama-test:latest', notes: 'Tóner para impresoras láser', source_asset_id: productId, use_image: true });
   assert.equal(r.status, 200, JSON.stringify(r.data));
-  assert.equal(r.data.options.length, 2); assert.equal(r.data.discarded, 1);
+  assert.equal(r.data.options.length, 2); assert.equal(r.data.discarded, 2);
   assert.ok(r.data.options.every((o) => !/\d/.test(o.titular + o.apoyo)));
+  assert.ok(r.data.options.every((o) => !/original/i.test(o.titular + o.apoyo)), 'nunca «original» en tóner');
   assert.equal(r.data.used_image, true);
   const chat = stubHits.find((h) => h.url === '/api/chat').body;
   assert.equal(chat.stream, false); assert.equal(chat.model, 'llama-test:latest');
   assert.equal(chat.messages[1].images.length, 1);        // la foto viajó en base64 (visión)
   assert.match(chat.messages[0].content, /NO inventes precios/);
+  assert.match(chat.messages[1].content, /nunca «original»/);   // la regla de la marca viaja a la IA
   assert.ok(chat.format && chat.format.type === 'object'); // salida estructurada
   assert.equal((await api('POST', '/api/ai/suggest-copy', { notes: 'x' })).status, 400);                       // sin modelo
   const nf = await api('POST', '/api/ai/suggest-copy', { model: 'no-existe', notes: 'x' });

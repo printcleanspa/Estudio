@@ -61,6 +61,31 @@ function createApp({ dataDir = path.join(process.cwd(), 'data'), env = process.e
   }
   const readAssetBuffer = (a) => fs.readFileSync(path.join(uploads, a.file));
 
+
+  // Datos entregados por Michael (ficha técnica). Solo completa lo que esté vacío; nunca pisa lo que el usuario haya escrito.
+  const PRINTCLEAN_DEFAULTS = {
+    business: {
+      actividad: 'Suministros para impresoras (tóner y tintas alternativos/compatibles) y artículos de aseo',
+      whatsapp_pedidos: '+56 9 5820 5389', whatsapp_local: '+56 9 5014 6652', direccion: 'San Martín 267, Santiago Centro',
+      horario: 'Lunes a viernes 9:00 a 18:30. Sábado y domingo cerrado',
+      palabras_prohibidas: 'original, originales',
+      nota_redaccion: 'En tóner y tintas usar «alternativo» o «compatible», nunca «original».',
+    },
+    socials: { instagram_suministros: '@printcleansuministros', instagram_limpieza: '@printclean_limpieza' },
+    style: 'Logo B: círculo blanco con borde azul y la palabra «print clean». Nunca usar el logo de remolino de colores. No mezclar las cuentas de Instagram de suministros y de aseo.',
+  };
+  function seedPrintClean() {
+    for (const b of db.prepare("SELECT * FROM brands WHERE name='Print Clean SPA'").all()) {
+      const biz = j(b.business, {}), soc = j(b.socials, {});
+      let changed = false;
+      for (const [k, v] of Object.entries(PRINTCLEAN_DEFAULTS.business)) if (!biz[k]) { biz[k] = v; changed = true; }
+      for (const [k, v] of Object.entries(PRINTCLEAN_DEFAULTS.socials)) if (!soc[k]) { soc[k] = v; changed = true; }
+      const style = b.style || PRINTCLEAN_DEFAULTS.style;
+      if (changed || style !== b.style) db.prepare('UPDATE brands SET business=?,socials=?,style=? WHERE id=?').run(JSON.stringify(biz), JSON.stringify(soc), style, b.id);
+    }
+  }
+  seedPrintClean();
+
   // ---------- app ----------
   const app = express();
   app.disable('x-powered-by');
@@ -85,7 +110,8 @@ function createApp({ dataDir = path.join(process.cwd(), 'data'), env = process.e
     if (str(password, 200).length < 8) throw httpErr(400, 'La contraseña debe tener al menos 8 caracteres.');
     const r = db.prepare('INSERT INTO users(email,name,pass_hash,role) VALUES(?,?,?,?)').run(str(email).toLowerCase(), str(name) || 'Administrador', hashPassword(password), 'admin');
     // Marca inicial. Solo datos que el usuario ya dio: nombre y actividad. Sin colores/precios inventados.
-    db.prepare('INSERT INTO brands(name,business,style) VALUES(?,?,?)').run('Print Clean SPA', JSON.stringify({ actividad: 'Suministros para impresoras y artículos de aseo' }), '');
+    db.prepare('INSERT INTO brands(name,business,style) VALUES(?,?,?)').run('Print Clean SPA', '{}', '');
+    seedPrintClean();
     audit(r.lastInsertRowid, 'register', email);
     auth.createSession(res, r.lastInsertRowid);
     res.json({ ok: true });
@@ -240,7 +266,7 @@ function createApp({ dataDir = path.join(process.cwd(), 'data'), env = process.e
       let logoBuffer = null;
       if (b.use_logo && brand?.logo_asset_id) logoBuffer = readAssetBuffer(getAsset(brand.logo_asset_id));
       if (b.use_logo && !logoBuffer) throw httpErr(400, 'La marca no tiene logo oficial cargado.');
-      result = await connectors.get('local-compose').compose({ width: w, height: h, productBuffer: readAssetBuffer(src), logoBuffer, bg, headline: str(b.headline, 120), subline: str(b.subline, 200), textColor, font: brand?.fonts ? (j(brand.fonts, {}).titulos || 'sans-serif') : 'sans-serif', layout: b.layout });
+      result = await connectors.get('local-compose').compose({ width: w, height: h, productBuffer: readAssetBuffer(src), logoBuffer, bg, headline: str(b.headline, 120), subline: str(b.subline, 200), footer: b.use_whatsapp && brand && j(brand.business, {}).whatsapp_pedidos ? `WhatsApp pedidos: ${j(brand.business, {}).whatsapp_pedidos}` : '', textColor, font: brand?.fonts ? (j(brand.fonts, {}).titulos || 'sans-serif') : 'sans-serif', layout: b.layout });
       meta = { ...baseMeta, ...result.meta, bg, logoUsed: !!logoBuffer };
       cost = 0;
     } else if (provider === 'ollama-image' || provider === 'sd-webui') {
