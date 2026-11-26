@@ -5,20 +5,10 @@ let cleanup = null;
 
 const MENU = [
   ['home', 'Inicio', '🏠'], ['identity', 'Identidad y logos', '🎨'], ['images', 'Generador de imágenes', '🖼️'], ['design', 'Diseño gráfico', '✏️'],
-  ['video', 'Estudio de video', '🎬', 2], ['reels', 'Reels', '📱', 2], ['music', 'Música y audio', '🎵', 3], ['voice', 'Voz IA', '🎙️', 3],
-  ['marketing', 'Marketing', '📣', 4], ['instagram', 'Instagram', '📸', 4], ['google', 'Google Ads', '🔎', 4],
+  ['video', 'Estudio de video', '🎬'], ['reels', 'Reels', '📱'], ['music', 'Música y audio', '🎵'], ['voice', 'Voz IA', '🎙️'],
+  ['marketing', 'Marketing', '📣'], ['instagram', 'Instagram', '📸'], ['google', 'Google Ads', '🔎'],
   ['library', 'Biblioteca de archivos', '📁'], ['connectors', 'Conectores', '🔌'], ['projects', 'Proyectos', '🗂️'], ['settings', 'Configuración', '⚙️'],
 ];
-const COMING = {
-  video: { phase: 2, title: 'Estudio de video', items: ['Video desde texto o imágenes (requiere un proveedor de video por API)', 'Línea de tiempo con varias pistas, transiciones y exportación MP4 (FFmpeg local)', 'Subtítulos automáticos', 'Animación de fotografías de producto'] },
-  reels: { phase: 2, title: 'Reels', items: ['Plantillas 9:16 con escenas', 'Secuencias de imágenes con música y texto', 'Exportación MP4 vertical'] },
-  music: { phase: 3, title: 'Música y audio', items: ['Música de fondo con licencia comercial verificada', 'Efectos de sonido', 'Mezcla y volumen sincronizados con el video'] },
-  voice: { phase: 3, title: 'Voz IA', items: ['Guiones comerciales', 'Locuciones en español (texto a voz por API)', 'Subtítulos desde audio', 'Carga de grabaciones propias'] },
-  marketing: { phase: 4, title: 'Marketing', items: ['Ideas de campaña, textos, títulos, hashtags y calendario de contenido', 'Variaciones de anuncios por público', 'Todo sin publicar nada sin su aprobación'] },
-  instagram: { phase: 4, title: 'Instagram', items: ['Publicaciones, carruseles, historias y Reels', 'Publicación vía Instagram Graph API (requiere cuenta profesional y app de Meta con permisos aprobados)'] },
-  google: { phase: 4, title: 'Google Ads', items: ['Creatividades Display y textos de anuncios', 'Conexión con Google Ads API (requiere developer token aprobado por Google)', 'YouTube Data API cuando corresponda'] },
-};
-
 // ---------------- arranque ----------------
 async function boot() {
   window.addEventListener('need-login', showLogin);
@@ -75,8 +65,8 @@ async function route() {
       cleanup = await renderEditor($('#page'), arg, { brand: brand(), brands: S.brands, starter: query.get('starter') === '1' });
       return;
     }
-    const pages = { home: pHome, identity: pIdentity, images: pImages, design: pDesignList, library: pLibrary, connectors: pConnectors, projects: pProjects, settings: pSettings };
-    if (COMING[page]) return shell(page, pComing(COMING[page]));
+    const pages = { home: pHome, identity: pIdentity, images: pImages, design: pDesignList, library: pLibrary, connectors: pConnectors, projects: pProjects, settings: pSettings,
+      video: () => pVideo('video'), reels: () => pVideo('reels'), music: pMusic, voice: pVoice, marketing: () => pMarketing('marketing'), instagram: () => pMarketing('instagram'), google: () => pMarketing('google') };
     const fn = pages[page] || pHome;
     shell(pages[page] ? page : 'home', h('div', { class: 'muted' }, 'Cargando…'));
     $('#page').replaceChildren(await fn());
@@ -84,11 +74,6 @@ async function route() {
 }
 
 // ---------------- páginas ----------------
-function pComing(c) {
-  return h('div', {}, h('h1', {}, c.title), h('div', { class: 'note info', style: { margin: '12px 0' } }, `Este módulo todavía no está construido: se desarrolla en la Fase ${c.phase}. No hay botones aquí para no simular funciones que no existen.`),
-    h('div', { class: 'card' }, h('h3', {}, 'Lo que incluirá'), h('ul', {}, c.items.map((i) => h('li', {}, i)))));
-}
-
 async function pHome() {
   const d = await api('GET', '/api/dashboard');
   const stat = (label, v, href, sub) => h('a', { href, class: 'card', style: { textDecoration: 'none', color: 'inherit' } }, h('div', { class: 'muted small' }, label), h('div', { class: 'stat' }, v), sub ? h('div', { class: 'small muted' }, sub) : null);
@@ -99,7 +84,7 @@ async function pHome() {
     h('h1', {}, `Hola, ${S.user.name}`), h('p', { class: 'muted' }, 'Elija una marca arriba, cargue una fotografía y produzca el material.'),
     h('div', { class: 'grid g4', style: { marginTop: '14px' } },
       stat('Imágenes creadas', d.counts.images, '#/images', `${d.counts.images_pending} por revisar`), stat('Diseños', d.counts.designs, '#/projects', `${d.counts.designs_pending} pendientes de aprobar`),
-      stat('Videos creados', d.counts.videos, '#/video', 'Disponible en Fase 2'), stat('Archivos exportados', d.counts.exports, '#/library')),
+      stat('Videos creados', d.counts.videos, '#/video'), stat('Archivos exportados', d.counts.exports, '#/library')),
     h('div', { class: 'grid g2', style: { marginTop: '16px' } },
       h('div', { class: 'card' }, h('h3', {}, 'Conectores activos'), d.connectors_active.length ? h('ul', { style: { margin: 0 } }, d.connectors_active.map((c) => h('li', {}, c))) : h('span', { class: 'muted' }, 'Ninguno'), h('p', {}, h('a', { href: '#/connectors' }, 'Ver todos los conectores'))),
       h('div', { class: 'card' }, h('h3', {}, 'Uso de motores y costos'), d.usage.length ? h('table', {}, h('tbody', {}, d.usage.map((u) => h('tr', {}, h('td', {}, u.connector), h('td', {}, `${u.ops} usos`), h('td', {}, 'Gratis'))))) : h('span', { class: 'muted' }, 'Sin uso todavía.'),
@@ -107,6 +92,7 @@ async function pHome() {
     section('Diseños pendientes de aprobar', d.pending_designs, designCard, 'No hay diseños pendientes.'),
     section('Proyectos recientes', d.recent_designs, designCard, 'Aún no hay diseños. Cree uno en Diseño gráfico.'),
     section('Imágenes creadas', d.recent_images, assetCard, 'Aún no hay imágenes generadas.'),
+    section('Videos creados', d.recent_videos, assetCard, 'Aún no hay videos. Cree uno en Reels o Estudio de video.'),
     section('Archivos exportados', d.recent_exports, assetCard, 'Aún no hay exportaciones.'));
 }
 
@@ -315,7 +301,7 @@ async function pLibrary() {
     const p = new URLSearchParams(); if (!f.all && brand()) p.set('brand_id', brand().id); if (f.kind) p.set('kind', f.kind); if (f.q) p.set('q', f.q);
     const items = await api('GET', `/api/assets?${p}`);
     grid.replaceChildren(...(items.length ? items.map((a) => h('div', { class: 'card item' },
-      a.mime === 'application/pdf' ? h('div', { class: 'thumb', style: { display: 'grid', placeItems: 'center', fontSize: '40px' } }, '📄') : h('a', { href: a.url, target: '_blank' }, h('img', { class: 'thumb', src: a.thumb_url, alt: a.name, loading: 'lazy' })),
+      a.mime === 'application/pdf' ? h('div', { class: 'thumb', style: { display: 'grid', placeItems: 'center', fontSize: '40px' } }, '📄') : a.mime.startsWith('audio/') ? h('div', {}, h('div', { class: 'thumb', style: { display: 'grid', placeItems: 'center', fontSize: '40px', aspectRatio: '2' } }, '🎵'), h('audio', { controls: true, src: a.url, style: { width: '100%' } })) : h('a', { href: a.url, target: '_blank' }, h('img', { class: 'thumb', src: a.thumb_url, alt: a.name, loading: 'lazy' })),
       h('div', { class: 't', title: a.name }, a.name), h('div', { class: 'row', style: { gap: '4px' } }, h('span', { class: 'badge' }, KIND_LABEL[a.kind] || a.kind), a.official ? h('span', { class: 'badge ok' }, 'Oficial') : null, statusBadge(a.status)),
       h('div', { class: 'small muted' }, `${a.width ? a.width + '×' + a.height + ' · ' : ''}${fmtSize(a.bytes)}`),
       h('div', { class: 'acts' }, h('a', { class: 'btn sm', href: `/api/assets/${a.id}/download` }, 'Descargar'),
@@ -332,6 +318,8 @@ async function pLibrary() {
 
 // ----- Conectores -----
 const HOWTO = {
+  ffmpeg: ['1. Instale FFmpeg (gratis): Windows → winget install Gyan.FFmpeg · macOS → brew install ffmpeg · Linux → sudo apt install ffmpeg', '2. Reinicie Estudio Creativo IA y recargue esta página.'],
+  piper: ['1. Descargue Piper y una voz en español (ver docs/VIDEO_Y_AUDIO.md).', '2. En .env defina PIPER_PATH (ejecutable) y PIPER_MODEL (archivo .onnx de la voz).', '3. Reinicie Estudio. Verifique que la licencia de la voz permita uso comercial.'],
   ollama: ['1. Instale Ollama (gratis): app en ollama.com/download, o en PowerShell: irm https://ollama.com/install.ps1 | iex', '2. Descargue el modelo recomendado para PC sin GPU (texto + imágenes): ollama pull gemma4:e2b', '3. Compruebe que todo responda: npm run check:ollama. Luego recargue esta página.', 'Imágenes con Ollama es EXPERIMENTAL (hoy nació en macOS). Si no está disponible en su sistema, use Stable Diffusion.'],
   'sd-webui': ['1. Instale Stable Diffusion WebUI (AUTOMATIC1111, Forge o SD.Next) e inícielo con la opción --api.', '2. Defina en .env: SD_WEBUI_URL=http://127.0.0.1:7860', '3. Reinicie Estudio Creativo IA. Requiere GPU para velocidad razonable.'],
 };
@@ -341,11 +329,11 @@ const COMPARE = [
   ['Stable Diffusion WebUI', 'Imagen desde texto / variación de foto', 'Sí, local (integrado)', 'Gratis (software libre)', 'Su GPU', 'Buena con buen modelo', 'Muchos modelos abiertos', 'Pide GPU; revisar licencia del modelo; puede alterar productos'],
   ['ComfyUI', 'Flujos de imagen avanzados', 'Sí, local', 'Gratis', 'Su GPU', 'Alta', 'Muy flexible', 'No integrado aún (Fase 2)'],
   ['rembg / modelos de recorte', 'Quitar fondos', 'Local (librería)', 'Gratis', 'Su equipo', 'Buena en objetos simples', 'Sin costo por imagen', 'No integrado aún (Fase 2)'],
-  ['FFmpeg', 'Montaje, cortes, subtítulos, MP4', 'Local', 'Gratis (software libre)', 'Su equipo', 'Profesional', 'Control total', 'No integrado aún (Fase 2)'],
-  ['Whisper (local)', 'Subtítulos desde audio', 'Local', 'Gratis (modelos abiertos)', 'Su equipo', 'Alta', 'Sin cuotas', 'No integrado aún (Fase 2)'],
-  ['Texto a voz local (ej. Piper)', 'Locuciones en español', 'Local', 'Gratis', 'Su equipo', 'Buena', 'Sin cuotas', 'VERIFICAR licencia de la voz/motor para uso comercial (Fase 3)'],
-  ['Música', 'Fondo musical', 'Local o biblioteca libre', 'Gratis', '—', '—', '—', 'VERIFICAR licencia comercial: algunos modelos abiertos solo permiten uso no comercial'],
-  ['Instagram Graph API / Google Ads API', 'Publicar y gestionar campañas', 'Sí (APIs gratuitas)', 'API gratuita; la publicidad se paga aparte', 'Aprobación de Meta / Google', '—', 'Publicación desde la plataforma', 'Requiere cuentas y permisos aprobados (Fase 4)'],
+  ['FFmpeg', 'Video, Reels, audio y MP4', 'Local (integrado)', 'Gratis (software libre)', 'Su equipo', 'Profesional', 'Control total, sin suscripción', 'Hay que instalarlo; en un PC sin GPU los videos tardan más'],
+  ['Whisper (local)', 'Subtítulos automáticos desde audio', 'Local', 'Gratis (modelos abiertos)', 'Su equipo', 'Alta', 'Sin cuotas', 'Pendiente: hoy los subtítulos se escriben por escena'],
+  ['Piper (voz local)', 'Locuciones en español', 'Local (integrado, opcional)', 'Gratis', 'Su equipo', 'Buena', 'Sin cuotas', 'VERIFICAR licencia de la voz para uso comercial'],
+  ['Música', 'Fondo musical', 'Suba sus pistas (integrado)', 'Gratis', '—', '—', 'Control de licencias por archivo', 'No genera música con IA: muchos modelos abiertos prohíben el uso comercial'],
+  ['Instagram / Google Ads (publicar)', 'Publicar y gestionar campañas', 'APIs gratuitas', 'API gratuita; la publicidad se paga aparte', 'Aprobación de Meta / Google', '—', '—', 'NO se hace desde Estudio: lo hace su panel en Cowork. Estudio entrega textos y archivos listos'],
 ];
 async function pConnectors() {
   const { active, planned } = await api('GET', '/api/connectors');
@@ -358,7 +346,7 @@ async function pConnectors() {
       !c.configured && HOWTO[c.id] ? h('details', {}, h('summary', { style: { cursor: 'pointer', fontWeight: 600 } }, 'Cómo activarlo'), h('ul', { class: 'small' }, HOWTO[c.id].map((x) => h('li', {}, x)))) : null,
       h('a', { class: 'small', href: c.info.docs, target: '_blank', rel: 'noopener' }, 'Documentación oficial')))),
     h('h2', { style: { marginTop: '24px' } }, 'Próximos conectores (aún no integrados)'),
-    h('div', { class: 'card tablewrap' }, h('table', {}, h('thead', {}, h('tr', {}, ['Servicio', 'Categoría', 'Fase', 'Nota'].map((x) => h('th', {}, x)))), h('tbody', {}, planned.map((p) => h('tr', {}, h('td', {}, p.label), h('td', {}, p.category), h('td', {}, `Fase ${p.phase}`), h('td', {}, p.note)))))),
+    h('div', { class: 'card tablewrap' }, h('table', {}, h('thead', {}, h('tr', {}, ['Servicio', 'Categoría', 'Estado', 'Nota'].map((x) => h('th', {}, x)))), h('tbody', {}, planned.map((p) => h('tr', {}, h('td', {}, p.label), h('td', {}, p.category), h('td', {}, 'Pendiente'), h('td', {}, p.note)))))),
     h('h2', { style: { marginTop: '24px' } }, 'Comparativa de motores gratuitos'),
     h('div', { class: 'note', style: { marginBottom: '10px' } }, 'Tabla orientativa. Donde dice VERIFICAR, confirme la licencia en el sitio oficial antes de uso comercial. Los modelos de IA tienen licencias distintas: algunos prohíben el uso comercial.'),
     h('div', { class: 'card tablewrap' }, h('table', {}, h('thead', {}, h('tr', {}, ['Servicio', 'Funciones', 'API', 'Precio', 'Límites', 'Calidad', 'Ventajas', 'Desventajas'].map((x) => h('th', {}, x)))), h('tbody', {}, COMPARE.map((r) => h('tr', {}, r.map((c) => h('td', {}, c))))))));

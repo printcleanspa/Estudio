@@ -32,6 +32,12 @@ Los modelos de IA tienen licencias distintas: algunos no permiten uso comercial.
 
 **Automatización con n8n (avisos por correo, plan semanal, recordatorio de respaldo): [docs/N8N.md](docs/N8N.md).**
 
+## Video, audio y marketing (gratis, en su equipo)
+- **Reels y video:** fotos reales → escenas con texto, transiciones, zoom suave, música, locución, logo y WhatsApp → MP4 (9:16, 1:1 o 16:9). Requiere FFmpeg. Vista previa rápida y versión final. Guía: [docs/VIDEO_Y_AUDIO.md](docs/VIDEO_Y_AUDIO.md). Compruebe con `npm run check:media`.
+- **Música:** suba pistas con licencia comercial (cada audio exige confirmarla).
+- **Voz IA:** Piper local (opcional) o su propia grabación.
+- **Marketing, Instagram, Google Ads:** textos, guiones de Reel, calendario y anuncios con Ollama, respetando sus reglas y los límites de cada plataforma. **Estudio no publica**: usted copia y publica desde su panel.
+
 ## Flujo básico
 
 1. **Identidad y logos** → suba el logo oficial (se guarda sin modificarse) y complete colores, tipografías y datos.
@@ -42,7 +48,7 @@ Los modelos de IA tienen licencias distintas: algunos no permiten uso comercial.
 ## Pruebas
 
 ```bash
-npm test                                   # API (17 pruebas) + navegador real (2) si Playwright está disponible
+npm test                                   # API + video/audio/marketing + navegador real (Playwright)
 ```
 
 ## Seguridad

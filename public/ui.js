@@ -59,7 +59,7 @@ function promptModal(label, value = '') {
 
 const STATUS = { pending: ['Pendiente de revisión', 'warn'], approved: ['Aprobado', 'ok'], rejected: ['Rechazado', 'bad'], draft: ['Borrador', ''], none: ['', ''] };
 const statusBadge = (s) => (STATUS[s]?.[0] ? h('span', { class: `badge ${STATUS[s][1]}` }, STATUS[s][0]) : null);
-const KIND_LABEL = { logo: 'Logo', product: 'Producto', photo: 'Fotografía', background: 'Fondo', material: 'Material comercial', other: 'Otro', generated: 'Generada', export: 'Exportado' };
+const KIND_LABEL = { video: 'Video', audio: 'Audio', logo: 'Logo', product: 'Producto', photo: 'Fotografía', background: 'Fondo', material: 'Material comercial', other: 'Otro', generated: 'Generada', export: 'Exportado' };
 const fmtDate = (s) => (s ? new Date(s.replace(' ', 'T') + 'Z').toLocaleString('es-CL', { dateStyle: 'short', timeStyle: 'short' }) : '');
 const fmtSize = (n) => (n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.round(n / 1024) + ' KB');
 

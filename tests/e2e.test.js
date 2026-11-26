@@ -103,3 +103,55 @@ test('navegador: asistente de textos con Ollama (simulado) rellena el titular y 
     await page.screenshot({ path: path.join(os.tmpdir(), 'conectores-ollama.png') });
   } finally { await browser.close(); server.close(); fake.close(); fs.rmSync(dataDir, { recursive: true, force: true }); }
 });
+
+test('navegador: música, Reel con foto+música, vista previa, versión final, aprobación y guion de marketing', { skip: !chromium && 'Playwright no instalado', timeout: 170000 }, async () => {
+  const { execFileSync } = require('node:child_process');
+  try { execFileSync('ffmpeg', ['-version'], { stdio: 'ignore' }); } catch { return; }
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'estudio-e2e3-'));
+  const fake = http.createServer(async (req, res) => {
+    const c = []; for await (const x of req) c.push(x); let body = {}; try { body = JSON.parse(Buffer.concat(c).toString()); } catch { /* */ } res.setHeader('content-type', 'application/json');
+    if (req.url === '/api/tags') return res.end(JSON.stringify({ models: [{ name: 'llama-test:latest', size: 1 }] }));
+    if (req.url === '/api/chat') { const key = Object.keys(body.format?.properties || {})[0];
+      const out = key === 'titulo' ? { titulo: 'Tóner compatible', escenas: [{ texto_en_pantalla: 'Tóner compatible', locucion: 'Tenemos tóner compatible.', segundos: 2 }, { texto_en_pantalla: 'Pida por WhatsApp', locucion: 'Escríbanos.', segundos: 2 }] }
+        : { opciones: [{ texto: 'Papel para su oficina', hashtags: ['oficina'], llamado_a_la_accion: 'Escríbanos' }] };
+      return res.end(JSON.stringify({ message: { content: JSON.stringify(out) } })); }
+    res.statusCode = 404; res.end('{}');
+  });
+  await new Promise((r) => fake.listen(0, r));
+  const server = http.createServer(createApp({ dataDir, env: { OLLAMA_HOST: `http://127.0.0.1:${fake.address().port}` } })); await new Promise((r) => server.listen(0, r));
+  const p1 = path.join(dataDir, 'a.png'), p2 = path.join(dataDir, 'b.png'), wav = path.join(dataDir, 'musica.wav');
+  await sharp({ create: { width: 500, height: 700, channels: 4, background: '#1a7f37' } }).png().toFile(p1); await sharp({ create: { width: 500, height: 700, channels: 4, background: '#b42318' } }).png().toFile(p2);
+  execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=frequency=330:duration=4', wav]);
+  const browser = await chromium.launch(); const page = await browser.newPage({ viewport: { width: 1360, height: 900 } }); const errors = [];
+  page.on('response', (r) => { if (r.status() >= 400 && !r.url().endsWith('/api/auth/me')) errors.push(r.status() + ' ' + r.url()); }); page.on('pageerror', (e) => errors.push(e.message));
+  const shot = (n) => process.env.SHOTS_DIR && page.screenshot({ path: path.join(process.env.SHOTS_DIR, `${n}.png`) });
+  try {
+    await page.goto(`http://127.0.0.1:${server.address().port}`);
+    await page.fill('#l-email', 'm@test.cl'); await page.fill('#l-pass', 'clavesegura123'); await page.click('#l-go'); await page.waitForSelector('text=Hola');
+    // fotos
+    await page.click('a[href="#/library"]'); await page.waitForSelector('#up-file'); await page.selectOption('#up-kind', 'product'); await page.setInputFiles('#up-file', [p1, p2]); await page.click('#up-go'); await page.waitForSelector('text=b.png');
+    // música: sin licencia se rechaza, con licencia se guarda
+    await page.click('a[href="#/music"]'); await page.waitForSelector('#au-file'); await page.setInputFiles('#au-file', wav); await page.click('#au-go'); await page.waitForSelector('text=Confirme que tiene licencia');
+    await page.check('#au-lic'); await page.fill('#au-note', 'pista de prueba'); await page.click('#au-go'); await page.waitForSelector('text=Licencia comercial confirmada');
+    // voz: sin Piper hay guía clara y el botón está desactivado
+    await page.click('a[href="#/voice"]'); await page.waitForSelector('text=Piper no está configurado'); assert.ok(await page.isDisabled('#voice-go'));
+    // Reel
+    await page.click('a[href="#/reels"]'); await page.waitForSelector('#v-add');
+    for (let i = 0; i < 2; i++) { await page.click('#v-add'); await page.click('.picker img >> nth=' + i); await page.waitForSelector(`.v-caption >> nth=${i}`); }
+    await page.fill('.v-caption >> nth=0', 'Tóner compatible'); await page.fill('.v-secs >> nth=0', '2'); await page.fill('.v-secs >> nth=1', '2');
+    await page.selectOption('#v-music', { index: 1 }); await page.check('#v-wa'); await shot('09-reels-armado');
+    await page.click('#v-prev'); await page.waitForSelector('#v-player', { timeout: 90000 });
+    await page.waitForFunction(() => { const v = document.querySelector('#v-player'); return v && v.readyState >= 1 && v.duration > 3; }, null, { timeout: 20000 });
+    assert.ok(await page.isDisabled('#v-approve'), 'la vista previa no se aprueba');
+    await page.click('#v-final'); await page.waitForFunction(() => document.querySelector('#v-approve') && !document.querySelector('#v-approve').disabled, null, { timeout: 120000 });
+    await shot('10-reel-final'); await page.click('#v-approve'); await page.waitForSelector('text=Video aprobado');
+    await page.click('a[href="#/home"]'); await page.waitForSelector('text=Videos creados'); await shot('11-inicio-videos');
+    // marketing → guion → Reel
+    await page.click('a[href="#/marketing"]'); await page.waitForSelector('#mk-go'); await page.selectOption('#mk-kind', 'reel_script'); await page.fill('#mk-notes', 'Tóner compatible'); await page.click('#mk-go');
+    await page.waitForSelector('#mk-to-reel'); await shot('12-marketing'); await page.click('#mk-to-reel');
+    await page.waitForSelector('text=Cargué el guion'); assert.equal(await page.inputValue('.v-caption >> nth=0'), 'Tóner compatible');
+    await page.click('a[href="#/google"]'); await page.waitForSelector('text=hasta 30 caracteres');
+    assert.deepEqual(errors.filter((e) => !/^400 .*\/api\/assets$/.test(e)), [], 'sin errores (salvo el rechazo esperado del audio sin licencia)');
+    assert.equal(errors.filter((e) => /^400 .*\/api\/assets$/.test(e)).length, 1, 'exactamente un rechazo por falta de licencia');
+  } finally { await browser.close(); server.close(); fake.close(); fs.rmSync(dataDir, { recursive: true, force: true }); }
+});

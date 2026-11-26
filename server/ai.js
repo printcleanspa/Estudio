@@ -17,7 +17,7 @@ REGLAS ESTRICTAS:
 - Respeta las reglas de redacción de la empresa indicadas en los datos (palabras prohibidas y notas).
 - Devuelve exactamente 3 opciones en el JSON pedido.`;
 
-const nums = (t) => (String(t).match(/\d[\d.,]*/g) || []).map((x) => x.replace(/[.,]+$/, ''));
+const { makeGuard } = require('./guard');
 
 async function suggestCopy({ env, model, brand, notes, imageBuffer }) {
   if (!model) throw httpErr(400, 'Elija un modelo de Ollama (instálelo con: ollama pull <modelo>).');
@@ -26,15 +26,13 @@ async function suggestCopy({ env, model, brand, notes, imageBuffer }) {
   const raw = await connectors.get('ollama').chat({ env, model, system: SYSTEM, prompt, images: imageBuffer ? [imageBuffer] : [], format: SCHEMA });
   let parsed;
   try { parsed = JSON.parse(raw); } catch { throw httpErr(502, 'El modelo no devolvió un formato válido. Intente de nuevo o use un modelo más capaz.'); }
-  const banned = String(brand?.business?.palabras_prohibidas || '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
-  const hasBanned = (t) => banned.some((w) => new RegExp(`(^|[^\\p{L}])${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^\\p{L}]|$)`, 'iu').test(t));
-  const given = new Set(nums(`${notes} ${facts}`));
+  const chk = makeGuard(brand, notes);
   const options = []; let discarded = 0;
   for (const o of Array.isArray(parsed?.opciones) ? parsed.opciones : []) {
     const titular = String(o?.titular ?? '').trim().slice(0, 80), apoyo = String(o?.apoyo ?? '').trim().slice(0, 140);
     if (!titular) continue;
-    if (hasBanned(`${titular} ${apoyo}`)) { discarded++; continue; } // palabra prohibida por la marca (ej. «original» en tóner)
-    if (nums(`${titular} ${apoyo}`).some((n) => !given.has(n))) { discarded++; continue; } // cifras que usted no dio
+    if (chk.hasBanned(`${titular} ${apoyo}`)) { discarded++; continue; } // palabra prohibida por la marca (ej. «original» en tóner)
+    if (chk.inventedNumber(`${titular} ${apoyo}`)) { discarded++; continue; } // cifras que usted no dio
     options.push({ titular, apoyo });
   }
   if (!options.length) throw httpErr(502, discarded ? 'Todas las opciones rompían reglas (cifras inventadas o palabras prohibidas) y se descartaron. Intente de nuevo.' : 'El modelo no propuso opciones. Intente de nuevo.');

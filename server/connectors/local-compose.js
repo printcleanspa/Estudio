@@ -32,7 +32,7 @@ function textSvg(w, h, { headline, subline, footer, color, font, layout }) {
   const l1 = headline ? wrap(headline, maxChars) : [];
   const l2 = subline ? wrap(subline, Math.floor(maxChars * 1.6)) : [];
   const blockH = l1.length * fs1 * 1.2 + (l2.length ? l2.length * fs2 * 1.3 + fs2 * 0.5 : 0);
-  let y = layout === 'text-bottom' ? h - blockH - h * 0.05 + fs1 : h * 0.06 + fs1 + (layout === 'text-top-logo' ? h * 0.07 : 0);
+  let y = layout === 'text-bottom' ? h - blockH - h * (footer ? 0.095 : 0.05) + fs1 : h * 0.06 + fs1 + (layout === 'text-top-logo' ? h * 0.07 : 0);
   let out = '';
   for (const l of l1) { out += `<text x="${w / 2}" y="${y}" font-size="${fs1}" font-weight="700" text-anchor="middle" fill="${esc(color)}" font-family="${esc(font)}">${esc(l)}</text>`; y += fs1 * 1.2; }
   y += fs2 * 0.3;

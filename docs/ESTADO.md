@@ -32,3 +32,11 @@
 - Los modelos de IA locales tienen licencias propias (algunos sin uso comercial) y la calidad depende de su equipo.
 - **Ollama real aún sin probar:** la CLI no pudo instalarse en el entorno de desarrollo (la red bloquea ollama.com) ni hay GPU. Lo verificado es contra un servidor simulado; la primera prueba real es `npm run check:ollama` en su equipo.
 - **n8n:** 3 flujos creados como borradores (avisos, plan semanal, recordatorio de respaldo); los avisos desde Estudio están probados contra un webhook simulado, **no contra su n8n real** hasta que usted publique el flujo y pegue la URL. Detalles en docs/N8N.md.
+
+## Actualización: video, audio, voz y marketing
+- **Video/Reels (FFmpeg real, probado):** escenas desde fotos reales, texto, transición, zoom, música, locución, logo y WhatsApp → MP4 H.264/AAC; vista previa y versión final; aprobación; descarga; reproducción por partes.
+- **Música:** subida con licencia comercial obligatoria y validación de audio real.
+- **Voz:** Piper local opcional (probado con un Piper simulado) o grabación propia; palabras prohibidas respetadas.
+- **Marketing/Instagram/Google:** 5 tipos de contenido con guardias por código (palabras prohibidas, cifras inventadas —incluidos % y precios—, límites de plataforma). *Probado con Ollama simulado.*
+- Estudio **no publica** (Instagram/Google/Drive los maneja el panel de Michael en Cowork).
+- Pendiente: subtítulos automáticos (Whisper), video y música generados por IA.

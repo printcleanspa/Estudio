@@ -1,5 +1,6 @@
 'use strict';
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const express = require('express');
@@ -12,6 +13,8 @@ const { FORMATS } = require('./formats');
 const connectors = require('./connectors');
 const { suggestCopy } = require('./ai');
 const { notify } = require('./notify');
+const { renderVideo, VIDEO_FORMATS } = require('./video');
+const marketing = require('./marketing');
 
 const httpErr = (status, msg) => Object.assign(new Error(msg), { status });
 const str = (v, max = 200) => String(v ?? '').trim().slice(0, max);
@@ -33,11 +36,12 @@ function createApp({ dataDir = path.join(process.cwd(), 'data'), env = process.e
     url: `/files/${a.id}`, thumb_url: a.thumb ? `/files/${a.id}/thumb` : null,
   });
   const getAsset = (id) => db.prepare('SELECT * FROM assets WHERE id=?').get(Number(id));
-  const EXT = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/svg+xml': 'svg', 'application/pdf': 'pdf' };
+  const EXT = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/svg+xml': 'svg', 'application/pdf': 'pdf', 'audio/mpeg': 'mp3', 'audio/wav': 'wav', 'audio/mp4': 'm4a', 'audio/ogg': 'ogg', 'video/mp4': 'mp4' };
+  const isMedia = (m) => Boolean(m) && (m === 'application/pdf' || m.startsWith('audio/') || m.startsWith('video/'));
 
-  async function saveAsset({ buffer, brand_id = null, kind, name, official = 0, source = 'upload', parent_id = null, status = 'none', meta = {}, mime }) {
-    let width = null, height = null, thumbName = null;
-    if (mime !== 'application/pdf') {
+  async function saveAsset({ buffer, brand_id = null, kind, name, official = 0, source = 'upload', parent_id = null, status = 'none', meta = {}, mime, width: w0 = null, height: h0 = null, thumbBuffer = null }) {
+    let width = w0, height = h0, thumbName = null;
+    if (!isMedia(mime)) {
       let md;
       try { md = await sharp(buffer).metadata(); } catch { throw httpErr(400, 'El archivo no es una imagen válida.'); }
       const fmt = { png: 'image/png', jpeg: 'image/jpeg', webp: 'image/webp', svg: 'image/svg+xml' }[md.format];
@@ -47,9 +51,13 @@ function createApp({ dataDir = path.join(process.cwd(), 'data'), env = process.e
     const id = crypto.randomBytes(12).toString('hex');
     const file = `${id}.${EXT[mime]}`;
     fs.writeFileSync(path.join(uploads, file), buffer);
-    if (mime !== 'application/pdf') {
+    if (!isMedia(mime)) {
       thumbName = `${id}.thumb.webp`;
       await sharp(buffer, { density: 144 }).resize(480, 480, { fit: 'inside', withoutEnlargement: true }).webp({ quality: 80 }).toFile(path.join(uploads, thumbName));
+    }
+    if (mime.startsWith('video/') && thumbBuffer) {
+      thumbName = `${id}.thumb.webp`;
+      await sharp(thumbBuffer).resize(480, 480, { fit: 'inside', withoutEnlargement: true }).webp({ quality: 80 }).toFile(path.join(uploads, thumbName));
     }
     const sha = crypto.createHash('sha256').update(buffer).digest('hex');
     const r = db.prepare(`INSERT INTO assets(brand_id,kind,name,file,thumb,mime,width,height,bytes,sha256,official,source,parent_id,status,meta)
@@ -187,8 +195,25 @@ function createApp({ dataDir = path.join(process.cwd(), 'data'), env = process.e
     if (req.query.q) { where.push('name LIKE ?'); args.push(`%${str(req.query.q, 60)}%`); }
     res.json(db.prepare(`SELECT * FROM assets WHERE ${where.join(' AND ')} ORDER BY id DESC LIMIT 500`).all(...args).map(assetOut));
   });
+  // Audio: se valida con ffprobe y exige confirmar licencia de uso comercial (no se usa música protegida sin autorización).
+  async function saveAudioUpload(req) {
+    if (req.body.license_confirmed !== '1') throw httpErr(400, 'Confirme que tiene licencia de uso comercial de este audio (música libre de derechos, su propia grabación, etc.).');
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'estudio-audio-'));
+    const tmp = path.join(tmpDir, 'in.bin'); fs.writeFileSync(tmp, req.file.buffer);
+    try {
+      const info = await connectors.get('ffmpeg').probe(tmp, env);
+      if (!info.hasAudio || info.hasVideo) throw httpErr(400, 'El archivo debe ser solo audio (MP3, WAV, M4A u OGG).');
+      const fmt = info.format;
+      const mime = /mp3/.test(fmt) ? 'audio/mpeg' : /wav/.test(fmt) ? 'audio/wav' : /ogg/.test(fmt) ? 'audio/ogg' : /mp4|m4a|mov/.test(fmt) ? 'audio/mp4' : null;
+      if (!mime) throw httpErr(400, `Formato de audio no permitido (${fmt}). Use MP3, WAV, M4A u OGG.`);
+      const brand = req.body.brand_id ? getBrand(req.body.brand_id) : null;
+      return await saveAsset({ buffer: req.file.buffer, brand_id: brand?.id ?? null, kind: 'audio', mime, name: str(req.body.name) || str(req.file.originalname, 120) || 'audio', source: 'upload',
+        meta: { duration: Math.round(info.duration * 10) / 10, license_confirmed: true, license_note: str(req.body.license_note, 200), voice: req.body.voice === '1' } });
+    } finally { fs.rmSync(tmpDir, { recursive: true, force: true }); }
+  }
   app.post('/api/assets', upload.single('file'), async (req, res) => {
     if (!req.file) throw httpErr(400, 'Falta el archivo.');
+    if (req.body.kind === 'audio') { const a = await saveAudioUpload(req); audit(req.user.id, 'asset.upload', `audio:${a.name}`); return res.json(assetOut(a)); }
     const kind = KINDS.includes(req.body.kind) ? req.body.kind : 'other';
     const brand = req.body.brand_id ? getBrand(req.body.brand_id) : null;
     if (req.body.brand_id && !brand) throw httpErr(404, 'Marca no encontrada.');
@@ -207,10 +232,12 @@ function createApp({ dataDir = path.join(process.cwd(), 'data'), env = process.e
   app.patch('/api/assets/:id', (req, res) => {
     const a = getAsset(req.params.id); if (!a) throw httpErr(404, 'Archivo no encontrado.');
     if (req.body?.status !== undefined) {
-      if (a.kind !== 'generated') throw httpErr(400, 'Solo las imágenes generadas se aprueban o rechazan.');
+      if (a.kind !== 'generated' && a.kind !== 'video') throw httpErr(400, 'Solo las imágenes generadas y los videos se aprueban o rechazan.');
+      if (a.kind === 'video' && j(a.meta, {}).draft) throw httpErr(400, 'Es una vista previa de baja calidad. Cree la versión final para aprobarla.');
       if (!['pending', 'approved', 'rejected'].includes(req.body.status)) throw httpErr(400, 'Estado no válido.');
       db.prepare('UPDATE assets SET status=? WHERE id=?').run(req.body.status, a.id);
       audit(req.user.id, `asset.${req.body.status}`, a.name);
+      if (req.body.status === 'approved' && a.kind === 'video') emit('video.approved', { name: a.name });
     }
     if (req.body?.name !== undefined) db.prepare('UPDATE assets SET name=? WHERE id=?').run(str(req.body.name, 120) || a.name, a.id);
     res.json(assetOut(getAsset(a.id)));
@@ -300,6 +327,94 @@ function createApp({ dataDir = path.join(process.cwd(), 'data'), env = process.e
     audit(req.user.id, 'image.generate', `${provider} ${b.format}`);
     emit('image.pending', { brand: brand?.name ?? null, name: asset.name, format: fmt.label, provider });
     res.json(assetOut(asset));
+  });
+
+  // ---------- video y Reels (FFmpeg local) ----------
+  const jobs = new Map();
+  const luma = (hex) => { const h = hex.replace('#', ''); const f = h.length === 3 ? h.split('').map((c) => c + c).join('') : h.slice(0, 6); const [r, g, b] = [0, 2, 4].map((i) => parseInt(f.slice(i, i + 2), 16) / 255); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+  app.get('/api/video-formats', (req, res) => res.json(VIDEO_FORMATS));
+  app.post('/api/videos', async (req, res) => {
+    const b = req.body || {};
+    const fmt = VIDEO_FORMATS[b.format]; if (!fmt) throw httpErr(400, 'Formato de video no válido.');
+    if (!Array.isArray(b.scenes) || !b.scenes.length) throw httpErr(400, 'Agregue al menos una escena.');
+    const brand = b.brand_id ? getBrand(b.brand_id) : null;
+    if (!(await connectors.get('ffmpeg').status(env)).configured) throw httpErr(503, 'FFmpeg no está instalado. Instálelo (gratis): Windows → winget install Gyan.FFmpeg · macOS → brew install ffmpeg · Linux → sudo apt install ffmpeg.');
+    const scenes = b.scenes.map((s0, i) => {
+      const a = getAsset(s0?.asset_id);
+      if (!a || !a.mime.startsWith('image/')) throw httpErr(400, `La escena ${i + 1} necesita una imagen de la biblioteca.`);
+      return { buffer: readAssetBuffer(a), seconds: Number(s0.seconds) || 3, caption: str(s0.caption, 90), asset: a };
+    });
+    const audioOf = (id, label) => { if (!id) return null; const a = getAsset(id); if (!a || !a.mime.startsWith('audio/')) throw httpErr(400, `${label}: elija un audio de la biblioteca.`); return a; };
+    const music = audioOf(b.music_asset_id, 'Música'), voice = audioOf(b.voice_asset_id, 'Voz');
+    const colors = (brand ? j(brand.colors, []) : []).map((c) => c.hex).filter((x) => /^#[0-9a-fA-F]{6}$/.test(x));
+    const bgColor = /^#[0-9a-fA-F]{6}$/.test(b.bg_color || '') ? b.bg_color : (colors[0] || '#ffffff');
+    const biz = brand ? j(brand.business, {}) : {};
+    let logoBuffer = null;
+    if (b.use_logo) { if (!brand?.logo_asset_id) throw httpErr(400, 'La marca no tiene logo oficial cargado.'); logoBuffer = readAssetBuffer(getAsset(brand.logo_asset_id)); }
+    const footer = b.use_whatsapp && biz.whatsapp_pedidos ? `WhatsApp pedidos: ${biz.whatsapp_pedidos}` : '';
+    const vol = (v, d) => (Number.isFinite(Number(v)) && v !== '' && v !== null && v !== undefined ? Math.min(1.5, Math.max(0, Number(v))) : d);
+    const jobId = crypto.randomBytes(8).toString('hex');
+    const job = { id: jobId, status: 'running', progress: 0, userId: req.user.id };
+    jobs.set(jobId, job); setTimeout(() => jobs.delete(jobId), 3600 * 1000).unref();
+    res.status(202).json({ job_id: jobId });
+    (async () => {
+      try {
+        const r = await renderVideo({
+          env, scenes, format: fmt, draft: Boolean(b.draft), transition: b.transition === 'none' ? 'none' : 'fade', transitionSeconds: b.transition_seconds, motion: b.motion !== false,
+          musicFile: music ? path.join(uploads, music.file) : null, musicVolume: vol(b.music_volume, voice ? 0.2 : 0.6), voiceFile: voice ? path.join(uploads, voice.file) : null, voiceVolume: vol(b.voice_volume, 1),
+          style: { bg: { type: 'solid', colors: [bgColor] }, textColor: luma(bgColor) > 0.55 ? '#111111' : '#ffffff', font: (brand && j(brand.fonts, {}).titulos) || 'sans-serif', logoBuffer, footer },
+          onProgress: (p) => { job.progress = p; },
+        });
+        const warnings = [];
+        for (const a of [music, voice]) if (a && !j(a.meta, {}).license_confirmed) warnings.push(`El audio «${a.name}» no tiene licencia comercial confirmada.`);
+        const asset = await saveAsset({
+          buffer: r.buffer, brand_id: brand?.id ?? null, kind: 'video', mime: 'video/mp4', width: r.width, height: r.height, thumbBuffer: r.thumbBuffer, source: 'ffmpeg', status: 'pending',
+          name: `${str(b.name, 80) || `${brand?.name || 'Video'} ${fmt.label.split(' (')[0]}`}${b.draft ? ' (vista previa)' : ''} ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`,
+          meta: { format: b.format, draft: Boolean(b.draft), duration: Math.round(r.duration * 10) / 10, scenes: scenes.map((x) => ({ asset_id: x.asset.id, seconds: x.seconds, caption: x.caption })), music_asset_id: music?.id ?? null, voice_asset_id: voice?.id ?? null, transition: b.transition === 'none' ? 'none' : 'fade', motion: b.motion !== false, whatsapp: Boolean(footer), logo: Boolean(logoBuffer), warnings },
+        });
+        logUsage('ffmpeg', 'video.render', 0); audit(job.userId, 'video.create', asset.name);
+        if (!b.draft) emit('video.pending', { brand: brand?.name ?? null, name: asset.name, format: fmt.label });
+        job.status = 'done'; job.progress = 1; job.asset = assetOut(asset);
+      } catch (e) { job.status = 'error'; job.error = e.message; if (!e.status || e.status >= 500) console.error('[video]', e); }
+    })();
+  });
+  app.get('/api/videos/jobs/:id', (req, res) => {
+    const job = jobs.get(req.params.id); if (!job || job.userId !== req.user.id) throw httpErr(404, 'Trabajo no encontrado (puede haber expirado).');
+    res.json({ status: job.status, progress: job.progress, asset: job.asset ?? null, error: job.error ?? null });
+  });
+
+  // ---------- voz IA local (Piper) ----------
+  app.post('/api/voice', async (req, res) => {
+    const text = str(req.body?.text, 1500); if (!text) throw httpErr(400, 'Escriba el texto de la locución.');
+    const brand = req.body?.brand_id ? getBrand(req.body.brand_id) : null;
+    const banned = String(brand ? j(brand.business, {}).palabras_prohibidas || '' : '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
+    const hit = banned.find((w) => new RegExp(`(^|[^\\p{L}])${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^\\p{L}]|$)`, 'iu').test(text));
+    if (hit) throw httpErr(400, `El texto usa la palabra prohibida «${hit}» según las reglas de la marca.`);
+    const r = await connectors.get('piper').synth({ env, text });
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'estudio-voz-')); const tmp = path.join(tmpDir, 'v.wav'); fs.writeFileSync(tmp, r.buffer);
+    let info; try { info = await connectors.get('ffmpeg').probe(tmp, env); } finally { fs.rmSync(tmpDir, { recursive: true, force: true }); }
+    const a = await saveAsset({ buffer: r.buffer, brand_id: brand?.id ?? null, kind: 'audio', mime: 'audio/wav', name: str(req.body?.name, 80) || `Locución ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`, source: 'piper', meta: { duration: Math.round(info.duration * 10) / 10, voice: true, text, license_confirmed: false, license_note: 'Voz sintética local (Piper): verifique la licencia de la voz antes de uso comercial.' } });
+    logUsage('piper', 'voice.synth', 0); audit(req.user.id, 'voice.create', a.name);
+    res.json(assetOut(a));
+  });
+  app.post('/api/assets/:id/confirm-license', (req, res) => {
+    const a = getAsset(req.params.id); if (!a || a.kind !== 'audio') throw httpErr(404, 'Audio no encontrado.');
+    const m = j(a.meta, {}); m.license_confirmed = true; m.license_note = str(req.body?.license_note, 200) || m.license_note;
+    db.prepare('UPDATE assets SET meta=? WHERE id=?').run(JSON.stringify(m), a.id); audit(req.user.id, 'audio.license', a.name);
+    res.json(assetOut(getAsset(a.id)));
+  });
+
+  // ---------- marketing con IA local ----------
+  app.get('/api/ai/marketing-kinds', (req, res) => res.json(Object.fromEntries(Object.entries(marketing.KINDS).map(([k, v]) => [k, v.label]))));
+  app.post('/api/ai/marketing', async (req, res) => {
+    const b = req.body || {};
+    const brand = b.brand_id ? getBrand(b.brand_id) : null;
+    const out = await marketing.generate({
+      env, kind: str(b.kind, 30), model: str(b.model, 100), notes: str(b.notes, 1500), audience: str(b.audience, 200), line: ['suministros', 'aseo'].includes(b.line) ? b.line : '',
+      brand: brand ? { name: brand.name, business: j(brand.business, {}), socials: j(brand.socials, {}), style: brand.style } : null,
+    });
+    logUsage('ollama', `marketing.${out.kind}`); audit(req.user.id, 'ai.marketing', `${out.kind} ${out.model}`);
+    res.json(out);
   });
 
   // ---------- asistente de textos con IA local (Ollama) ----------
@@ -452,12 +567,13 @@ function createApp({ dataDir = path.join(process.cwd(), 'data'), env = process.e
         designs: c("SELECT COUNT(*) c FROM designs WHERE is_template=0"),
         images: c("SELECT COUNT(*) c FROM assets WHERE kind='generated'"),
         images_pending: c("SELECT COUNT(*) c FROM assets WHERE kind='generated' AND status='pending'"),
-        videos: 0, exports: c("SELECT COUNT(*) c FROM assets WHERE kind='export'"),
+        videos: c("SELECT COUNT(*) c FROM assets WHERE kind='video'"), exports: c("SELECT COUNT(*) c FROM assets WHERE kind='export'"),
         designs_pending: c("SELECT COUNT(*) c FROM designs WHERE is_template=0 AND status<>'approved'"),
         brands: c('SELECT COUNT(*) c FROM brands'),
       },
       recent_designs: db.prepare('SELECT * FROM designs WHERE is_template=0 ORDER BY updated_at DESC, id DESC LIMIT 6').all().map((d) => designOut(d)),
       recent_images: db.prepare("SELECT * FROM assets WHERE kind='generated' ORDER BY id DESC LIMIT 6").all().map(assetOut),
+      recent_videos: db.prepare("SELECT * FROM assets WHERE kind='video' ORDER BY id DESC LIMIT 6").all().map(assetOut),
       recent_exports: db.prepare("SELECT * FROM assets WHERE kind='export' ORDER BY id DESC LIMIT 6").all().map(assetOut),
       pending_designs: db.prepare("SELECT * FROM designs WHERE is_template=0 AND status<>'approved' ORDER BY updated_at DESC LIMIT 6").all().map((d) => designOut(d)),
       connectors_active: (await connectors.list(env)).filter((x) => x.configured).map((x) => x.label),

@@ -5,7 +5,8 @@
   "main": "server/index.js",
   "scripts": {
     "start": "node --disable-warning=ExperimentalWarning server/index.js",
-    "test": "node --disable-warning=ExperimentalWarning --test tests/api.test.js tests/e2e.test.js",
+    "test": "node --disable-warning=ExperimentalWarning --test tests/api.test.js tests/media.test.js tests/e2e.test.js",
+    "check:media": "node --disable-warning=ExperimentalWarning scripts/check-media.js",
     "check:ollama": "node --disable-warning=ExperimentalWarning scripts/check-ollama.js",
     "backup": "node --disable-warning=ExperimentalWarning scripts/backup.js"
   },
