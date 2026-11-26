@@ -169,6 +169,10 @@ async function pImages() {
   const head = h('input', { type: 'text', id: 'headline', placeholder: 'Ej. Tóner para su impresora' }), sub = h('input', { type: 'text', id: 'subline', placeholder: 'Opcional' });
   const useLogo = h('input', { type: 'checkbox', id: 'uselogo', checked: Boolean(b?.logo), disabled: !b?.logo });
   const useWa = h('input', { type: 'checkbox', id: 'usewa', checked: Boolean(b?.business?.whatsapp_pedidos), disabled: !b?.business?.whatsapp_pedidos });
+  const layoutSel = h('select', { id: 'layout', value: 'card' }, h('option', { value: 'card' }, 'Tarjeta Print Clean (recomendado)'), h('option', { value: 'simple' }, 'Simple: foto sobre fondo de color'));
+  const lineSel = h('select', { id: 'line' }, h('option', { value: '' }, 'Sin Instagram en la banda'), h('option', { value: 'suministros' }, 'Suministros (tóner, tintas, papel)'), h('option', { value: 'aseo' }, 'Aseo y limpieza'));
+  const rotSel = h('select', { id: 'rot' }, [0, 90, 180, 270].map((d) => h('option', { value: d }, d ? `Girar ${d}°` : 'Sin girar')));
+  const zoomIn = h('input', { type: 'range', id: 'zoom', min: 1, max: 2, step: 0.05, value: 1 }), fxIn = h('input', { type: 'range', id: 'fx', min: 0, max: 1, step: 0.05, value: 0.5 }), fyIn = h('input', { type: 'range', id: 'fy', min: 0, max: 1, step: 0.05, value: 0.5 });
 
   // --- asistente de textos (Ollama) ---
   const suggestOut = h('div');
@@ -190,7 +194,9 @@ async function pImages() {
       h('div', { style: { marginTop: '8px' } }, h('button', { class: 'btn', id: 'ai-go', onclick: suggest }, 'Sugerir textos')), suggestOut)
     : h('div', { class: 'note', style: { marginTop: '12px' } }, `Asistente de textos no disponible: ${oll.note} Vea Conectores para instalarlo (gratis).`);
 
-  const localBox = h('div', {}, h('label', {}, 'Fondo'), h('div', { class: 'row' }, bgType, c1, c2), h('label', {}, 'Titular'), head, h('label', {}, 'Texto de apoyo'), sub,
+  const localBox = h('div', {}, h('label', {}, 'Estilo'), layoutSel, h('label', {}, 'Cuenta de Instagram de la banda (no se mezclan)'), lineSel,
+    h('details', { style: { marginTop: '8px' } }, h('summary', { style: { cursor: 'pointer', fontWeight: 600 } }, 'Encuadre de la foto (girar y acercar)'), h('label', {}, 'Girar'), rotSel, h('label', {}, 'Acercar'), zoomIn, h('label', {}, 'Mover ← →'), fxIn, h('label', {}, 'Mover ↑ ↓'), fyIn, h('p', { class: 'small muted' }, 'Girar y acercar no alteran el producto: solo cambian el encuadre.')),
+    h('div', { class: 'small muted' }, 'El fondo de color solo se usa en el estilo Simple.'), h('label', {}, 'Fondo (estilo Simple)'), h('div', { class: 'row' }, bgType, c1, c2), h('label', {}, 'Titular'), head, h('label', {}, 'Texto de apoyo'), sub,
     h('label', { class: 'row', style: { fontWeight: 400 } }, useLogo, b?.logo ? 'Incluir logo oficial' : 'Incluir logo (la marca no tiene logo cargado)'),
     h('label', { class: 'row', style: { fontWeight: 400 } }, useWa, b?.business?.whatsapp_pedidos ? `Incluir WhatsApp de pedidos (${b.business.whatsapp_pedidos})` : 'Incluir WhatsApp (cárguelo en Identidad y logos)'), assistant);
 
@@ -218,7 +224,7 @@ async function pImages() {
 
   async function generate() {
     const body = { brand_id: b?.id, provider: st.provider, source_asset_id: st.src?.id, format: fmt.value };
-    if (st.provider === 'local-compose') Object.assign(body, { bg_type: bgType.value, bg_colors: [c1.value, c2.value], headline: head.value, subline: sub.value, use_logo: useLogo.checked, use_whatsapp: useWa.checked });
+    if (st.provider === 'local-compose') Object.assign(body, { bg_type: bgType.value, bg_colors: [c1.value, c2.value], headline: head.value, subline: sub.value, use_logo: useLogo.checked, use_whatsapp: useWa.checked, layout: layoutSel.value, line: lineSel.value, photo_rotate: Number(rotSel.value), photo_zoom: Number(zoomIn.value), focus_x: Number(fxIn.value), focus_y: Number(fyIn.value) });
     else if (st.provider === 'ollama-image') Object.assign(body, { model: ollModel.value, prompt: ollPrompt.value });
     else Object.assign(body, { mode: sdMode.value, prompt: sdPrompt.value, negative: sdNeg.value });
     genBtn.disabled = true; genBtn.textContent = 'Generando… (la IA local puede tardar)';

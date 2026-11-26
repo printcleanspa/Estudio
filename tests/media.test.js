@@ -102,6 +102,13 @@ test('video: vista previa y versión final con transición, movimiento y música
   assert.equal((await api('PATCH', `/api/assets/${finalId}`, { status: 'approved' })).data.status, 'approved');
 });
 
+test('video con Tarjeta Print Clean: logo, banda, girar y acercar por escena (FFmpeg real)', { skip: !hasFfmpeg && 'sin ffmpeg', timeout: 120000 }, async () => {
+  const s = await api('POST', '/api/videos', { brand_id: brandId, format: 'reel', layout: 'card', line: 'aseo', use_whatsapp: true, draft: true, transition: 'fade', motion: true,
+    scenes: [{ asset_id: imgIds[0], seconds: 2, caption: 'Sacasarro Bioquim', zoom: 1.3, rotate: 180 }, { asset_id: imgIds[1], seconds: 2, caption: 'Resmas' }] });
+  assert.equal(s.status, 202); const j = await waitJob(s.data.job_id); assert.equal(j.status, 'done', j.error);
+  assert.equal(j.asset.meta.whatsapp, true); assert.equal(j.asset.width, 540);
+});
+
 test('video: se puede reproducir por partes (Range) y se descarga como MP4', { skip: !hasFfmpeg && 'sin ffmpeg' }, async () => {
   const r = await api('GET', `/files/${finalId}`, null, true, { range: 'bytes=0-99' });
   assert.equal(r.status, 206); assert.equal(r.headers.get('content-type'), 'video/mp4');

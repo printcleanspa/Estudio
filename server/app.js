@@ -80,6 +80,7 @@ function createApp({ dataDir = path.join(process.cwd(), 'data'), env = process.e
       nota_redaccion: 'En tóner y tintas usar «alternativo» o «compatible», nunca «original».',
     },
     socials: { instagram_suministros: '@printcleansuministros', instagram_limpieza: '@printclean_limpieza' },
+    colors: [{ name: 'Azul marino Print Clean', hex: '#023473' }, { name: 'Celeste', hex: '#96dcfe' }],
     style: 'Logo B: círculo blanco con borde azul y la palabra «print clean». Nunca usar el logo de remolino de colores. No mezclar las cuentas de Instagram de suministros y de aseo.',
   };
   function seedPrintClean() {
@@ -89,7 +90,8 @@ function createApp({ dataDir = path.join(process.cwd(), 'data'), env = process.e
       for (const [k, v] of Object.entries(PRINTCLEAN_DEFAULTS.business)) if (!biz[k]) { biz[k] = v; changed = true; }
       for (const [k, v] of Object.entries(PRINTCLEAN_DEFAULTS.socials)) if (!soc[k]) { soc[k] = v; changed = true; }
       const style = b.style || PRINTCLEAN_DEFAULTS.style;
-      if (changed || style !== b.style) db.prepare('UPDATE brands SET business=?,socials=?,style=? WHERE id=?').run(JSON.stringify(biz), JSON.stringify(soc), style, b.id);
+      const hadColors = j(b.colors, []).length > 0; const colors = hadColors ? j(b.colors, []) : PRINTCLEAN_DEFAULTS.colors;
+      if (changed || style !== b.style || !hadColors) db.prepare('UPDATE brands SET business=?,socials=?,style=?,colors=? WHERE id=?').run(JSON.stringify(biz), JSON.stringify(soc), style, JSON.stringify(colors), b.id);
     }
   }
   seedPrintClean();
@@ -268,6 +270,15 @@ function createApp({ dataDir = path.join(process.cwd(), 'data'), env = process.e
     sendFile(res, a, `${base}.${ext}`, false, true);
   });
 
+  // Pie de la «Tarjeta Print Clean»: WhatsApp de pedidos + Instagram de la línea (suministros o aseo; nunca se mezclan)
+  function cardFooter(brand, useWa, line) {
+    const biz = brand ? j(brand.business, {}) : {}, soc = brand ? j(brand.socials, {}) : {};
+    const handle = line === 'suministros' ? soc.instagram_suministros : line === 'aseo' ? soc.instagram_limpieza : '';
+    if (!useWa || !biz.whatsapp_pedidos) return handle ? ['', '', `Instagram ${handle}`].filter(Boolean) : [];
+    return ['Escríbenos por WhatsApp', biz.whatsapp_pedidos, handle ? `Instagram ${handle}` : ''].filter(Boolean);
+  }
+  const cardPalette = (brand) => { const c = (brand ? j(brand.colors, []) : []).map((x) => x.hex); return { navy: c[0] || '#023473', sky: c[1] || '#96dcfe' }; };
+
   // ---------- generador de imágenes ----------
   app.get('/api/formats', (req, res) => res.json(FORMATS));
   const luminance = (hex) => { const h = hex.replace('#', ''); const f = h.length === 3 ? h.split('').map((c) => c + c).join('') : h.slice(0, 6); const [r, g, b] = [0, 2, 4].map((i) => parseInt(f.slice(i, i + 2), 16) / 255); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
@@ -293,9 +304,15 @@ function createApp({ dataDir = path.join(process.cwd(), 'data'), env = process.e
       let logoBuffer = null;
       if (b.use_logo && brand?.logo_asset_id) logoBuffer = readAssetBuffer(getAsset(brand.logo_asset_id));
       if (b.use_logo && !logoBuffer) throw httpErr(400, 'La marca no tiene logo oficial cargado.');
+      if (b.layout === 'card') {
+        result = await connectors.get('local-compose').composeCard({ width: w, height: h, photoBuffer: readAssetBuffer(src), logoBuffer, headline: str(b.headline, 120), subline: str(b.subline, 200), footerLines: cardFooter(brand, b.use_whatsapp, b.line), palette: cardPalette(brand), rotate: b.photo_rotate, zoom: b.photo_zoom, fx: b.focus_x, fy: b.focus_y });
+        meta = { ...baseMeta, ...result.meta, line: b.line || null, logoUsed: !!logoBuffer };
+        cost = 0;
+      } else {
       result = await connectors.get('local-compose').compose({ width: w, height: h, productBuffer: readAssetBuffer(src), logoBuffer, bg, headline: str(b.headline, 120), subline: str(b.subline, 200), footer: b.use_whatsapp && brand && j(brand.business, {}).whatsapp_pedidos ? `WhatsApp pedidos: ${j(brand.business, {}).whatsapp_pedidos}` : '', textColor, font: brand?.fonts ? (j(brand.fonts, {}).titulos || 'sans-serif') : 'sans-serif', layout: b.layout });
       meta = { ...baseMeta, ...result.meta, bg, logoUsed: !!logoBuffer };
       cost = 0;
+      }
     } else if (provider === 'ollama-image' || provider === 'sd-webui') {
       // Motores de IA locales y gratuitos (Ollama experimental / Stable Diffusion WebUI).
       const prompt = str(b.prompt, 1500); if (!prompt) throw httpErr(400, 'Escriba la descripción de la imagen.');
@@ -342,7 +359,7 @@ function createApp({ dataDir = path.join(process.cwd(), 'data'), env = process.e
     const scenes = b.scenes.map((s0, i) => {
       const a = getAsset(s0?.asset_id);
       if (!a || !a.mime.startsWith('image/')) throw httpErr(400, `La escena ${i + 1} necesita una imagen de la biblioteca.`);
-      return { buffer: readAssetBuffer(a), seconds: Number(s0.seconds) || 3, caption: str(s0.caption, 90), asset: a };
+      return { buffer: readAssetBuffer(a), seconds: Number(s0.seconds) || 3, caption: str(s0.caption, 90), asset: a, rotate: s0.rotate, zoom: s0.zoom, fx: s0.fx, fy: s0.fy };
     });
     const audioOf = (id, label) => { if (!id) return null; const a = getAsset(id); if (!a || !a.mime.startsWith('audio/')) throw httpErr(400, `${label}: elija un audio de la biblioteca.`); return a; };
     const music = audioOf(b.music_asset_id, 'Música'), voice = audioOf(b.voice_asset_id, 'Voz');
@@ -362,7 +379,8 @@ function createApp({ dataDir = path.join(process.cwd(), 'data'), env = process.e
         const r = await renderVideo({
           env, scenes, format: fmt, draft: Boolean(b.draft), transition: b.transition === 'none' ? 'none' : 'fade', transitionSeconds: b.transition_seconds, motion: b.motion !== false,
           musicFile: music ? path.join(uploads, music.file) : null, musicVolume: vol(b.music_volume, voice ? 0.2 : 0.6), voiceFile: voice ? path.join(uploads, voice.file) : null, voiceVolume: vol(b.voice_volume, 1),
-          style: { bg: { type: 'solid', colors: [bgColor] }, textColor: luma(bgColor) > 0.55 ? '#111111' : '#ffffff', font: (brand && j(brand.fonts, {}).titulos) || 'sans-serif', logoBuffer, footer },
+          style: { bg: { type: 'solid', colors: [bgColor] }, textColor: luma(bgColor) > 0.55 ? '#111111' : '#ffffff', font: (brand && j(brand.fonts, {}).titulos) || 'sans-serif', logoBuffer, footer,
+            card: b.layout === 'card' ? { footerLines: cardFooter(brand, b.use_whatsapp, b.line), palette: cardPalette(brand) } : null },
           onProgress: (p) => { job.progress = p; },
         });
         const warnings = [];

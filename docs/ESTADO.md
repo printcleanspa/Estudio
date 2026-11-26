@@ -40,3 +40,8 @@
 - **Marketing/Instagram/Google:** 5 tipos de contenido con guardias por código (palabras prohibidas, cifras inventadas —incluidos % y precios—, límites de plataforma). *Probado con Ollama simulado.*
 - Estudio **no publica** (Instagram/Google/Drive los maneja el panel de Michael en Cowork).
 - Pendiente: subtítulos automáticos (Whisper), video y música generados por IA.
+
+## Muestras con fotos reales (26 nov)
+Se generaron 3 posts 4:5, 1 historia 9:16 y 1 Reel de 9 s con fotos del celular de Michael (Drive), el Logo B oficial y sus datos, con la plantilla **Tarjeta Print Clean** (fondo celeste, logo redondo, foto real en tarjeta, banda azul con WhatsApp e Instagram de la línea).
+- Funciona bien con fotos de buena toma (resmas, sacasarro). Girar y acercar el encuadre no altera el producto.
+- **Límite claro:** Estudio NO recorta el fondo. Con fotos de piso/pared/bodega el resultado es correcto pero no llega al nivel de «Limpia pisos» (producto recortado + ilustraciones). Para ese nivel falta recorte de fondo (ej. rembg, gratis y local, pero necesita Python y descargar un modelo) o fotos con fondo limpio.

@@ -8,7 +8,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const ffmpeg = require('./connectors/ffmpeg');
-const { compose } = require('./connectors/local-compose');
+const { compose, composeCard } = require('./connectors/local-compose');
 
 const httpErr = (status, message) => Object.assign(new Error(message), { status });
 const VIDEO_FORMATS = {
@@ -50,7 +50,9 @@ async function renderVideo(p) {
     const frames = [];
     for (let i = 0; i < n; i++) {
       const s = p.scenes[i];
-      const r = await compose({ width: W, height: H, productBuffer: s.buffer, logoBuffer: p.style.logoBuffer, bg: p.style.bg, headline: s.caption || '', subline: '', footer: p.style.footer || '', textColor: p.style.textColor, font: p.style.font, layout: s.caption ? 'text-bottom' : 'center' });
+      const r = p.style.card
+        ? await composeCard({ width: W, height: H, photoBuffer: s.buffer, logoBuffer: p.style.logoBuffer, headline: s.caption || '', subline: s.subcaption || '', footerLines: p.style.card.footerLines, palette: p.style.card.palette, rotate: s.rotate, zoom: s.zoom, fx: s.fx, fy: s.fy })
+        : await compose({ width: W, height: H, productBuffer: s.buffer, logoBuffer: p.style.logoBuffer, bg: p.style.bg, headline: s.caption || '', subline: '', footer: p.style.footer || '', textColor: p.style.textColor, font: p.style.font, layout: s.caption ? 'text-bottom' : 'center' });
       const f = path.join(tmp, `scene-${i}.png`); fs.writeFileSync(f, r.buffer); frames.push(f);
       if (i === 0) p.thumbBuffer = r.buffer;
     }

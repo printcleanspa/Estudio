@@ -10,7 +10,7 @@ async function pVideo(mode) {
   const b = brand();
   const [conns, vfmts, audios, past] = await Promise.all([api('GET', '/api/connectors'), api('GET', '/api/video-formats'), api('GET', '/api/assets?kind=audio'), api('GET', '/api/assets?kind=video')]);
   const ff = conns.active.find((c) => c.id === 'ffmpeg');
-  const st = { scenes: [], transition: 'fade', tsec: 0.5, motion: true, musicId: '', musicVol: 0.5, voiceId: '', voiceVol: 1, logo: false, wa: Boolean(b?.business?.whatsapp_pedidos), job: null };
+  const st = { layout: 'card', line: '', scenes: [], transition: 'fade', tsec: 0.5, motion: true, musicId: '', musicVol: 0.5, voiceId: '', voiceVol: 1, logo: false, wa: Boolean(b?.business?.whatsapp_pedidos), job: null };
   try { const sc = JSON.parse(sessionStorage.getItem('reelScript') || 'null'); if (sc) { sessionStorage.removeItem('reelScript'); st.scenes = sc.escenas.map((e) => ({ asset: null, seconds: e.segundos, caption: e.texto_en_pantalla })); st.name = sc.titulo; st.fromScript = true; } } catch { /* sin guion */ }
   const fmt = h('select', { id: 'v-format', value: mode === 'reels' ? 'reel' : 'reel' }, Object.entries(vfmts).filter(([k]) => mode !== 'reels' || k === 'reel').map(([k, f]) => h('option', { value: k }, f.label)));
   const nameInp = h('input', { type: 'text', id: 'v-name', placeholder: 'Nombre del video (opcional)', value: st.name || '' });
@@ -21,6 +21,8 @@ async function pVideo(mode) {
     list.replaceChildren(...(st.scenes.length ? st.scenes.map((s, i) => h('div', { class: 'card', style: { padding: '10px', marginBottom: '8px' } }, h('div', { class: 'row' },
       s.asset ? h('img', { src: s.asset.thumb_url, alt: '', style: { width: '56px', height: '56px', objectFit: 'contain', borderRadius: '8px', background: '#f0f1f7', cursor: 'pointer' }, onclick: () => pickFor(i) }) : h('button', { class: 'btn sm', onclick: () => pickFor(i) }, 'Elegir foto'),
       h('div', { style: { flex: 1, minWidth: '160px' } }, h('input', { type: 'text', class: 'v-caption', placeholder: 'Texto en pantalla (opcional)', value: s.caption, oninput: (e) => { s.caption = e.target.value; } })),
+      h('select', { class: 'v-rot', title: 'Girar foto', style: { width: '92px' }, value: s.rotate || 0, onchange: (e) => { s.rotate = Number(e.target.value); } }, [0, 90, 180, 270].map((d) => h('option', { value: d }, d ? `Girar ${d}°` : 'Sin girar'))),
+      h('select', { class: 'v-zoom', title: 'Acercar foto', style: { width: '92px' }, value: s.zoom || 1, onchange: (e) => { s.zoom = Number(e.target.value); } }, [1, 1.15, 1.3, 1.5].map((z) => h('option', { value: z }, z === 1 ? 'Sin zoom' : `Zoom ${z}×`))),
       h('label', { style: { margin: 0, fontWeight: 400 } }, 'Seg.'), h('input', { type: 'number', class: 'v-secs', min: 1, max: 15, step: 0.5, value: s.seconds, style: { width: '70px' }, oninput: (e) => { s.seconds = Number(e.target.value) || 3; sum(); } }),
       h('button', { class: 'btn sm', disabled: i === 0, title: 'Subir', onclick: () => { [st.scenes[i - 1], st.scenes[i]] = [st.scenes[i], st.scenes[i - 1]]; drawScenes(); } }, '↑'),
       h('button', { class: 'btn sm', disabled: i === st.scenes.length - 1, title: 'Bajar', onclick: () => { [st.scenes[i + 1], st.scenes[i]] = [st.scenes[i], st.scenes[i + 1]]; drawScenes(); } }, '↓'),
@@ -43,7 +45,7 @@ async function pVideo(mode) {
   async function start(draft) {
     const bad = st.scenes.findIndex((s) => !s.asset);
     if (bad >= 0) return toast(`La escena ${bad + 1} necesita una foto.`, 'err');
-    const body = { brand_id: b?.id, name: nameInp.value, format: fmt.value, scenes: st.scenes.map((s) => ({ asset_id: s.asset.id, seconds: s.seconds, caption: s.caption })), transition: st.transition, transition_seconds: st.tsec, motion: st.motion,
+    const body = { brand_id: b?.id, name: nameInp.value, format: fmt.value, scenes: st.scenes.map((s) => ({ asset_id: s.asset.id, seconds: s.seconds, caption: s.caption, rotate: s.rotate || 0, zoom: s.zoom || 1 })), layout: st.layout, line: st.line, transition: st.transition, transition_seconds: st.tsec, motion: st.motion,
       music_asset_id: st.musicId || undefined, music_volume: st.musicVol, voice_asset_id: st.voiceId || undefined, voice_volume: st.voiceVol, use_logo: st.logo, use_whatsapp: st.wa, draft };
     out.replaceChildren(); document.querySelectorAll('#v-prev,#v-final').forEach((x) => { x.disabled = true; });
     const prog = h('div', { style: { height: '10px', background: '#e3e5ef', borderRadius: '99px', overflow: 'hidden' } }, h('div', { id: 'v-bar', style: { height: '100%', width: '2%', background: 'var(--brand)', transition: 'width .3s' } }));
@@ -78,6 +80,8 @@ async function pVideo(mode) {
     h('div', { class: 'grid g2', style: { marginTop: '12px', alignItems: 'start' } },
       h('div', { class: 'card' }, h('h2', {}, '1. Escenas'), list, h('div', { class: 'row' }, h('button', { class: 'btn', id: 'v-add', onclick: addScene }, '＋ Agregar escena')), summary),
       h('div', { class: 'card' }, h('h2', {}, '2. Ajustes'), h('label', {}, 'Nombre'), nameInp, h('label', {}, 'Formato'), fmt,
+        h('label', {}, 'Estilo'), h('select', { id: 'v-layout', value: st.layout, onchange: (e) => { st.layout = e.target.value; } }, h('option', { value: 'card' }, 'Tarjeta Print Clean (recomendado)'), h('option', { value: 'simple' }, 'Simple: foto sobre fondo')),
+        h('label', {}, 'Instagram en la banda (no se mezclan)'), h('select', { id: 'v-line', onchange: (e) => { st.line = e.target.value; } }, h('option', { value: '' }, 'Sin Instagram'), h('option', { value: 'suministros' }, 'Suministros'), h('option', { value: 'aseo' }, 'Aseo y limpieza')),
         h('label', {}, 'Transición entre escenas'), trans, h('label', { class: 'row', style: { fontWeight: 400 } }, motion, 'Movimiento suave (zoom lento) en cada foto'),
         h('label', { class: 'row', style: { fontWeight: 400 } }, logo, b?.logo ? 'Incluir logo oficial' : 'Incluir logo (cárguelo en Identidad y logos)'),
         h('label', { class: 'row', style: { fontWeight: 400 } }, wa, b?.business?.whatsapp_pedidos ? `Incluir WhatsApp de pedidos (${b.business.whatsapp_pedidos})` : 'Incluir WhatsApp (cárguelo en Identidad y logos)'),

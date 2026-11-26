@@ -84,7 +84,7 @@ let brand, productId, logoBytes;
 test('marca inicial Print Clean SPA y edición de marca', async () => {
   const list = (await api('GET', '/api/brands')).data;
   assert.equal(list.length, 1); assert.equal(list[0].name, 'Print Clean SPA');
-  assert.deepEqual(list[0].colors, []); // no se inventan colores
+  assert.deepEqual(list[0].colors.map((c) => c.hex), ['#023473', '#96dcfe']); // colores tomados de la imagen terminada de Print Clean
   const bz = list[0].business;
   assert.equal(bz.whatsapp_pedidos, '+56 9 5820 5389'); assert.equal(bz.direccion, 'San Martín 267, Santiago Centro');
   assert.match(bz.palabras_prohibidas, /original/); assert.equal(list[0].socials.instagram_suministros, '@printcleansuministros');
@@ -137,6 +137,21 @@ test('imagen con WhatsApp de pedidos: el pie se dibuja y el producto sigue intac
   assert.ok(dark(Math.round(1080 * 0.93), 1080) > 50, 'hay texto oscuro en el pie');
   const none = await api('POST', '/api/images/generate', { brand_id: brand.id, provider: 'local-compose', source_asset_id: productId, format: 'ig-1x1', bg_colors: ['#ffffff'] });
   assert.equal(none.data.meta.footer, null);
+});
+
+test('Tarjeta Print Clean: tamaño exacto, banda con WhatsApp e Instagram de la línea, y girar/acercar sin alterar el producto', async () => {
+  const mk = (extra) => api('POST', '/api/images/generate', { brand_id: brand.id, provider: 'local-compose', layout: 'card', source_asset_id: productId, format: 'ig-4x5', headline: 'Sacasarro Bioquim 5 litros', subline: 'Limpia a profundidad', use_logo: true, use_whatsapp: true, ...extra });
+  const a = await mk({ line: 'aseo' });
+  assert.equal(a.status, 200, JSON.stringify(a.data)); assert.equal(a.data.width, 1080); assert.equal(a.data.height, 1350);
+  assert.equal(a.data.meta.layout, 'card'); assert.equal(a.data.meta.productModified, false); assert.equal(a.data.meta.cropped, false); assert.equal(a.data.meta.line, 'aseo');
+  const raw = await sharp(Buffer.from(await (await api('GET', `/files/${a.data.id}`, null, { raw: true })).arrayBuffer())).raw().toBuffer({ resolveWithObject: true });
+  const px = (x, y) => [...raw.data.slice((y * raw.info.width + x) * raw.info.channels, (y * raw.info.width + x) * raw.info.channels + 3)];
+  assert.deepEqual(px(75, 1200).map((v, i) => Math.abs(v - [0, 68, 170][i]) < 12), [true, true, true], 'la banda usa el primer color de la marca (#0044aa en esta prueba)');
+  const z = await mk({ photo_zoom: 1.5, photo_rotate: 180, focus_x: 0.4, focus_y: 0.6 });
+  assert.equal(z.status, 200); assert.equal(z.data.meta.cropped, true); assert.equal(z.data.meta.rotate, 180); assert.equal(z.data.meta.zoom, 1.5);
+  assert.equal(z.data.meta.productModified, false);
+  // sin línea no se pone Instagram; las cuentas nunca se mezclan: el texto solo viene del campo de la línea elegida
+  assert.equal((await mk({ line: 'suministros' })).data.meta.line, 'suministros');
 });
 
 test('aprobación de imagen generada y validaciones', async () => {
