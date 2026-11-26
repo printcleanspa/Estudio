@@ -79,7 +79,7 @@ const FONT = "Inter, 'Segoe UI', Arial, Helvetica, sans-serif";
 function wrapText(text, maxChars) { return wrap(text, maxChars); }
 function roundedMask(w, h, r) { return Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><rect width="${w}" height="${h}" rx="${r}" ry="${r}" fill="#fff"/></svg>`); }
 
-async function composeCard({ width: W, height: H, photoBuffer, logoBuffer, headline, subline, footerLines, palette, rotate = 0, zoom = 1, fx = 0.5, fy = 0.5, badgeTop, badgeMain, ribbon, compact = false }) {
+async function composeCard({ width: W, height: H, photoBuffer, logoBuffer, headline, subline, footerLines, palette, rotate = 0, zoom = 1, fx = 0.5, fy = 0.5, badgeTop, badgeMain, ribbon, compact = false, oldPrice }) {
   const navy = palette?.navy || '#023473', sky = palette?.sky || '#96dcfe';
   const m = Math.round(W * 0.045);
   const layers = [];
@@ -148,6 +148,11 @@ async function composeCard({ width: W, height: H, photoBuffer, logoBuffer, headl
     const d = Math.round(W * 0.25), bxx = Math.round(W - m - d + W * 0.012), byy = Math.round(Math.min(bandTop - gap - d * 0.9, cy + chh - d * 0.6));
     const f1 = Math.round(d * 0.17), f2 = Math.round(d * Math.min(0.27, 1.25 / String(badgeMain).length));
     layers.push({ input: Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${d}" height="${d}"><circle cx="${d / 2}" cy="${d / 2}" r="${d / 2 - 4}" fill="${esc(navy)}" stroke="#ffffff" stroke-width="8"/>${badgeTop ? `<text x="${d / 2}" y="${d * 0.36}" font-size="${f1}" font-weight="700" text-anchor="middle" fill="#fff" font-family="${esc(FONT)}">${esc(badgeTop)}</text>` : ''}<text x="${d / 2}" y="${badgeTop ? d * 0.64 : d * 0.57}" font-size="${f2}" font-weight="800" text-anchor="middle" fill="#fff" font-family="${esc(FONT)}">${esc(badgeMain)}</text></svg>`), left: bxx, top: byy });
+  }
+  if (badgeMain && oldPrice) {   // «Antes $X» tachado, justo encima del medallón de precio
+    const d = Math.round(W * 0.25), bxx = Math.round(W - m - d + W * 0.012), byy = Math.round(Math.min(bandTop - gap - d * 0.9, cy + chh - d * 0.6));
+    const fs = Math.round(d * 0.15), txtW = Math.round(String(`Antes ${oldPrice}`).length * fs * 0.56), pw2 = txtW + Math.round(fs * 1.4), ph2 = Math.round(fs * 1.9);
+    layers.push({ input: Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${pw2}" height="${ph2}"><rect width="${pw2}" height="${ph2}" rx="${ph2 / 2}" fill="#ffffff" opacity="0.96"/><text x="${pw2 / 2}" y="${ph2 * 0.67}" font-size="${fs}" font-weight="700" text-anchor="middle" fill="#4b5563" font-family="${esc(FONT)}">${esc('Antes ' + oldPrice)}</text><line x1="${fs * 0.6}" y1="${ph2 * 0.52}" x2="${pw2 - fs * 0.6}" y2="${ph2 * 0.52}" stroke="#e11d2e" stroke-width="${Math.max(3, Math.round(fs * 0.13))}"/></svg>`), left: Math.min(Math.round(bxx + d / 2 - pw2 / 2), W - Math.round(m * 0.9) - pw2), top: Math.max(0, byy - ph2 - Math.round(W * 0.012)) });
   }
   if (ribbon) {   // cinta de oferta sobre la esquina superior izquierda de la tarjeta
     const rw = Math.round(W * 0.34), rh = Math.round(W * 0.085), rf = Math.round(rh * 0.5);
