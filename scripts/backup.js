@@ -12,3 +12,5 @@ const db = new DatabaseSync(path.join(dataDir, 'estudio.db'));
 db.exec(`VACUUM INTO '${path.join(out, 'estudio.db').replace(/'/g, "''")}'`); db.close();
 fs.cpSync(path.join(dataDir, 'uploads'), path.join(out, 'uploads'), { recursive: true });
 console.log('Respaldo creado en', out);
+require('../server/env').loadEnv();
+require('../server/notify').notify(process.env, 'backup.created', { file: stamp }).then((r) => { if (r.sent) console.log('Aviso enviado a n8n.'); });

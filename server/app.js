@@ -11,6 +11,7 @@ const { hashPassword, verifyPassword, makeAuth } = require('./auth');
 const { FORMATS } = require('./formats');
 const connectors = require('./connectors');
 const { suggestCopy } = require('./ai');
+const { notify } = require('./notify');
 
 const httpErr = (status, msg) => Object.assign(new Error(msg), { status });
 const str = (v, max = 200) => String(v ?? '').trim().slice(0, max);
@@ -22,6 +23,7 @@ function createApp({ dataDir = path.join(process.cwd(), 'data'), env = process.e
   const auth = makeAuth(db, { secureCookie: env.COOKIE_SECURE === '1' });
   const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_UPLOAD, files: 1 } });
   const audit = (userId, action, detail = '') => db.prepare('INSERT INTO audit_log(user_id,action,detail) VALUES(?,?,?)').run(userId ?? null, action, String(detail).slice(0, 500));
+  const emit = (event, data) => { notify(env, event, data); }; // aviso a n8n, sin esperar
   const logUsage = (connector, op, cost = null, units = 1) => db.prepare('INSERT INTO usage_log(connector,op,units,cost_usd) VALUES(?,?,?,?)').run(connector, op, units, cost);
 
   // ---------- helpers de activos ----------
@@ -270,6 +272,7 @@ function createApp({ dataDir = path.join(process.cwd(), 'data'), env = process.e
     });
     logUsage(provider, 'image.generate', cost);
     audit(req.user.id, 'image.generate', `${provider} ${b.format}`);
+    emit('image.pending', { brand: brand?.name ?? null, name: asset.name, format: fmt.label, provider });
     res.json(assetOut(asset));
   });
 
@@ -350,6 +353,7 @@ function createApp({ dataDir = path.join(process.cwd(), 'data'), env = process.e
     if (!['draft', 'approved', 'rejected'].includes(req.body?.status)) throw httpErr(400, 'Estado no válido.');
     db.prepare('UPDATE designs SET status=? WHERE id=?').run(req.body.status, d.id);
     audit(req.user.id, `design.${req.body.status}`, d.name);
+    if (req.body.status === 'approved') emit('design.approved', { name: d.name, format: `${d.width}x${d.height}`, version: d.version });
     res.json(designOut(getDesign(d.id)));
   });
   app.post('/api/designs/:id/template', (req, res) => {
@@ -404,6 +408,7 @@ function createApp({ dataDir = path.join(process.cwd(), 'data'), env = process.e
     const asset = await saveAsset({ buffer: out, brand_id: d.brand_id, kind: 'export', name: `${d.name} v${d.version}.${fmt}`, source: 'editor', mime, meta: { design_id: d.id, version: d.version, format: fmt } });
     logUsage('editor-local', `export.${fmt}`, 0);
     audit(req.user.id, 'design.export', `${d.name} ${fmt}`);
+    emit('export.created', { name: d.name, file_format: fmt });
     res.json(assetOut(asset));
   });
 
@@ -440,6 +445,7 @@ function createApp({ dataDir = path.join(process.cwd(), 'data'), env = process.e
     const file = path.join(dir, `estudio-${new Date().toISOString().replace(/[:.]/g, '-')}.db`);
     db.exec(`VACUUM INTO '${file.replace(/'/g, "''")}'`);
     audit(req.user.id, 'backup', path.basename(file));
+    emit('backup.created', { file: path.basename(file) });
     res.json({ ok: true, file: path.basename(file), note: 'Respalda la base de datos. Los archivos están en data/uploads (copie esa carpeta o use npm run backup).' });
   });
 

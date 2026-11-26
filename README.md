@@ -30,6 +30,8 @@ La primera vez, la pantalla pide crear la cuenta de administrador. Se crea la ma
 Si Ollama o Stable Diffusion no están, la plataforma funciona igual con la composición local. La pantalla **Conectores** muestra el estado real de cada motor.
 Los modelos de IA tienen licencias distintas: algunos no permiten uso comercial. Revise la ficha de cada modelo antes de publicar.
 
+**Automatización con n8n (avisos por correo, plan semanal, recordatorio de respaldo): [docs/N8N.md](docs/N8N.md).**
+
 ## Flujo básico
 
 1. **Identidad y logos** → suba el logo oficial (se guarda sin modificarse) y complete colores, tipografías y datos.
@@ -40,7 +42,7 @@ Los modelos de IA tienen licencias distintas: algunos no permiten uso comercial.
 ## Pruebas
 
 ```bash
-npm test                                   # API (16 pruebas) + navegador real (2) si Playwright está disponible
+npm test                                   # API (17 pruebas) + navegador real (2) si Playwright está disponible
 ```
 
 ## Seguridad

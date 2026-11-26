@@ -266,3 +266,38 @@ test('el estado de Ollama expone el modelo por defecto configurado', async () =>
   assert.equal(o.defaults.text, 'llama-test:latest');
   s3.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test('avisos a n8n: se envían los eventos como texto, y si n8n falla la operación sigue funcionando', async () => {
+  const got = [];
+  const hook = http.createServer(async (req, res) => { const c = []; for await (const x of req) c.push(x); got.push(JSON.parse(Buffer.concat(c).toString())); res.end('{}'); });
+  await new Promise((r) => hook.listen(0, r));
+  const mk = async (url) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'estudio-n8n-'));
+    const srv = http.createServer(createApp({ dataDir: dir, env: { N8N_WEBHOOK_URL: url, PUBLIC_BASE_URL: 'http://localhost:3000' } })); await new Promise((r) => srv.listen(0, r));
+    const b = `http://127.0.0.1:${srv.address().port}`; let ck = '';
+    const call = async (m, p, body) => { const r = await fetch(b + p, { method: m, headers: { cookie: ck, ...(body instanceof FormData ? {} : { 'content-type': 'application/json' }) }, body: body instanceof FormData ? body : body && JSON.stringify(body) }); const sc = r.headers.get('set-cookie'); if (sc) ck = sc.split(';')[0]; return { status: r.status, data: await r.json() }; };
+    await call('POST', '/api/auth/register', { email: 'a@b.cl', password: 'clavesegura123' });
+    return { srv, dir, call };
+  };
+  const flow = async (t) => {
+    const f = new FormData(); f.append('file', new Blob([await png(300, 300, '#00aa00')], { type: 'image/png' }), 'p.png'); f.append('kind', 'product');
+    const a = await t.call('POST', '/api/assets', f);
+    const g = await t.call('POST', '/api/images/generate', { provider: 'local-compose', source_asset_id: a.data.id, format: 'ig-1x1', headline: 'Hola', brand_id: 1 });
+    const d = await t.call('POST', '/api/designs', { name: 'Promo', format: 'ig-1x1' });
+    await t.call('PATCH', `/api/designs/${d.data.id}/status`, { status: 'approved' });
+    return { g, d };
+  };
+  const ok = await mk(`http://127.0.0.1:${hook.address().port}/webhook/secreto`);
+  const r1 = await flow(ok);
+  assert.equal(r1.g.status, 200);
+  await new Promise((r) => setTimeout(r, 400));
+  const ev = got.map((x) => x.event);
+  assert.ok(ev.includes('image.pending') && ev.includes('design.approved'), ev.join());
+  const p = got.find((x) => x.event === 'image.pending');
+  assert.equal(p.app, 'estudio-creativo-ia'); assert.equal(p.brand, 'Print Clean SPA'); assert.equal(p.base_url, 'http://localhost:3000');
+  assert.ok(!JSON.stringify(got).includes('base64') && !JSON.stringify(got).includes('password'));
+  const bad = await mk('http://127.0.0.1:1/webhook/caido');   // n8n caído: no debe afectar
+  assert.equal((await flow(bad)).g.status, 200);
+  for (const t of [ok, bad]) { t.srv.close(); fs.rmSync(t.dir, { recursive: true, force: true }); }
+  hook.close();
+});
