@@ -42,6 +42,7 @@ test('flujo completo en el navegador: marca → logo → foto → imagen → apr
 
     // Generar imagen local
     await page.click('a[href="#/images"]'); await page.click('#pick-src'); await page.click('.picker img >> nth=0');
+    await page.waitForSelector('text=Asistente de textos no disponible');
     await page.selectOption('#fmt', 'ig-4x5'); await page.fill('#headline', 'Tóner para su impresora'); await page.fill('#subline', 'Consulte por mayor');
     await page.click('#gen'); await page.waitForSelector('#result-img'); await shot('04-generador');
     assert.ok(await page.isDisabled('text=Abrir en el editor'), 'no se puede usar sin aprobar');
@@ -68,7 +69,7 @@ test('flujo completo en el navegador: marca → logo → foto → imagen → apr
     // Inicio refleja la actividad
     await page.click('a[href="#/home"]'); await page.waitForSelector('text=Archivos exportados'); await shot('06-inicio-final');
     // Conectores
-    await page.click('a[href="#/connectors"]'); await page.waitForSelector('text=No configurado'); await shot('07-conectores');
+    await page.click('a[href="#/connectors"]'); await page.waitForSelector('text=No disponible'); await shot('07-conectores');
     // Móvil
     const m = await browser.newContext({ viewport: { width: 390, height: 800 }, isMobile: true }); const mp = await m.newPage();
     await mp.goto(url); await mp.fill('#l-email', 'm@test.cl'); await mp.fill('#l-pass', 'clavesegura123'); await mp.click('#l-go'); await mp.waitForSelector('text=Hola, Michael');
@@ -77,4 +78,28 @@ test('flujo completo en el navegador: marca → logo → foto → imagen → apr
     await m.close();
     assert.deepEqual(errors.filter((e) => !/favicon/.test(e)), [], 'sin errores en consola');
   } finally { await browser.close(); server.close(); fs.rmSync(dataDir, { recursive: true, force: true }); }
+});
+
+test('navegador: asistente de textos con Ollama (simulado) rellena el titular y no deja pasar cifras inventadas', { skip: !chromium && 'Playwright no instalado', timeout: 90000 }, async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'estudio-e2e2-'));
+  const fake = http.createServer(async (req, res) => {
+    for await (const c of req); res.setHeader('content-type', 'application/json');
+    if (req.url === '/api/tags') return res.end(JSON.stringify({ models: [{ name: 'llama-test:latest', size: 1 }] }));
+    if (req.url === '/api/chat') return res.end(JSON.stringify({ message: { content: JSON.stringify({ opciones: [{ titular: 'Papel para su oficina', apoyo: 'Consulte por mayor' }, { titular: 'Solo 50% de descuento', apoyo: 'Hoy' }] }) } }));
+    res.statusCode = 404; res.end('{}');
+  });
+  await new Promise((r) => fake.listen(0, r));
+  const server = http.createServer(createApp({ dataDir, env: { OLLAMA_HOST: `http://127.0.0.1:${fake.address().port}` } })); await new Promise((r) => server.listen(0, r));
+  const browser = await chromium.launch(); const page = await browser.newPage();
+  try {
+    await page.goto(`http://127.0.0.1:${server.address().port}`);
+    await page.fill('#l-email', 'm@test.cl'); await page.fill('#l-pass', 'clavesegura123'); await page.click('#l-go'); await page.waitForSelector('text=Hola');
+    await page.click('a[href="#/images"]'); await page.waitForSelector('#ai-go');
+    await page.fill('#ai-notes', 'Resmas de papel para oficina'); await page.click('#ai-go');
+    await page.waitForSelector('text=Papel para su oficina');
+    assert.equal(await page.locator('text=50% de descuento').count(), 0, 'la opción con cifra inventada no se muestra');
+    await page.click('text=Usar este'); assert.equal(await page.inputValue('#headline'), 'Papel para su oficina');
+    await page.click('a[href="#/connectors"]'); await page.waitForSelector('text=llama-test:latest');
+    await page.screenshot({ path: path.join(os.tmpdir(), 'conectores-ollama.png') });
+  } finally { await browser.close(); server.close(); fake.close(); fs.rmSync(dataDir, { recursive: true, force: true }); }
 });

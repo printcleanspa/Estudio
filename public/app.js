@@ -89,23 +89,21 @@ function pComing(c) {
     h('div', { class: 'card' }, h('h3', {}, 'Lo que incluirá'), h('ul', {}, c.items.map((i) => h('li', {}, i)))));
 }
 
-const money = (n) => `US$ ${n.toFixed(2)}`;
 async function pHome() {
   const d = await api('GET', '/api/dashboard');
   const stat = (label, v, href, sub) => h('a', { href, class: 'card', style: { textDecoration: 'none', color: 'inherit' } }, h('div', { class: 'muted small' }, label), h('div', { class: 'stat' }, v), sub ? h('div', { class: 'small muted' }, sub) : null);
   const designCard = (x) => h('a', { href: `#/design/${x.id}`, class: 'card item', style: { textDecoration: 'none', color: 'inherit' } }, h('img', { class: 'thumb', src: x.preview_url || 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22/%3E', alt: '' }), h('div', { class: 't' }, x.name), statusBadge(x.status));
   const assetCard = (a) => h('a', { href: a.url, target: '_blank', class: 'card item', style: { textDecoration: 'none', color: 'inherit' } }, (a.thumb_url ? h('img', { class: 'thumb', src: a.thumb_url, alt: '' }) : h('div', { class: 'thumb', style: { display: 'grid', placeItems: 'center', fontSize: '40px' } }, '📄')), h('div', { class: 't' }, a.name), statusBadge(a.status));
   const section = (title, items, render, empty) => h('div', { style: { marginTop: '22px' } }, h('h2', {}, title), items.length ? h('div', { class: 'grid gauto' }, items.map(render)) : h('div', { class: 'empty' }, empty));
-  const totalCost = d.usage.reduce((s, u) => s + u.known_cost_usd, 0), noCost = d.usage.reduce((s, u) => s + u.ops_without_cost, 0);
-  return h('div', {},
+    return h('div', {},
     h('h1', {}, `Hola, ${S.user.name}`), h('p', { class: 'muted' }, 'Elija una marca arriba, cargue una fotografía y produzca el material.'),
     h('div', { class: 'grid g4', style: { marginTop: '14px' } },
       stat('Imágenes creadas', d.counts.images, '#/images', `${d.counts.images_pending} por revisar`), stat('Diseños', d.counts.designs, '#/projects', `${d.counts.designs_pending} pendientes de aprobar`),
       stat('Videos creados', d.counts.videos, '#/video', 'Disponible en Fase 2'), stat('Archivos exportados', d.counts.exports, '#/library')),
     h('div', { class: 'grid g2', style: { marginTop: '16px' } },
       h('div', { class: 'card' }, h('h3', {}, 'Conectores activos'), d.connectors_active.length ? h('ul', { style: { margin: 0 } }, d.connectors_active.map((c) => h('li', {}, c))) : h('span', { class: 'muted' }, 'Ninguno'), h('p', {}, h('a', { href: '#/connectors' }, 'Ver todos los conectores'))),
-      h('div', { class: 'card' }, h('h3', {}, 'Consumo y costos'), d.usage.length ? h('table', {}, h('tbody', {}, d.usage.map((u) => h('tr', {}, h('td', {}, u.connector), h('td', {}, `${u.ops} usos`), h('td', {}, u.ops_without_cost ? `${u.ops_without_cost} sin costo configurado` : money(u.known_cost_usd)))))) : h('span', { class: 'muted' }, 'Sin consumo todavía.'),
-        h('p', { class: 'small muted' }, `Costo conocido acumulado: ${money(totalCost)}${noCost ? ` (+ ${noCost} usos de pago sin precio configurado)` : ''}. Es una estimación a partir de los precios que usted configura, no una factura.`))),
+      h('div', { class: 'card' }, h('h3', {}, 'Uso de motores y costos'), d.usage.length ? h('table', {}, h('tbody', {}, d.usage.map((u) => h('tr', {}, h('td', {}, u.connector), h('td', {}, `${u.ops} usos`), h('td', {}, 'Gratis'))))) : h('span', { class: 'muted' }, 'Sin uso todavía.'),
+        h('p', { class: 'small muted' }, 'Costo acumulado: US$ 0. Todos los motores incluidos son gratuitos y se ejecutan en su equipo; no hay servicios de pago activados.'))),
     section('Diseños pendientes de aprobar', d.pending_designs, designCard, 'No hay diseños pendientes.'),
     section('Proyectos recientes', d.recent_designs, designCard, 'Aún no hay diseños. Cree uno en Diseño gráfico.'),
     section('Imágenes creadas', d.recent_images, assetCard, 'Aún no hay imágenes generadas.'),
@@ -163,44 +161,79 @@ async function pIdentity() {
 }
 
 // ----- Generador de imágenes -----
+const IMG_MODEL_RE = /flux|z-image|diffusion|sdxl|\bsd\b/i;
 async function pImages() {
-  const b = brand(); const conns = (await api('GET', '/api/connectors')).active; const oa = conns.find((c) => c.id === 'openai-images');
-  const st = { provider: 'local-compose', mode: 'text2img', src: null, last: null };
+  const b = brand(); const conns = (await api('GET', '/api/connectors')).active;
+  const oll = conns.find((c) => c.id === 'ollama'), sd = conns.find((c) => c.id === 'sd-webui');
+  const models = oll.models || [];
+  const textModels = models.filter((m) => !IMG_MODEL_RE.test(m.name)), imgModels = models.filter((m) => IMG_MODEL_RE.test(m.name));
+  const st = { provider: 'local-compose', src: null, last: null };
+  const modelSel = (id, list) => h('select', { id }, list.length ? list.map((m) => h('option', { value: m.name }, m.name)) : [h('option', { value: '' }, 'No hay modelos instalados')]);
+
   const srcBox = h('div'); const out = h('div');
-  const drawSrc = () => srcBox.replaceChildren(st.src ? h('div', { class: 'row' }, h('img', { src: st.src.thumb_url, style: { width: '72px', height: '72px', objectFit: 'contain', borderRadius: '8px', background: '#f0f1f7' }, alt: '' }), h('div', {}, h('div', { class: 'small' }, st.src.name), h('button', { class: 'btn sm', onclick: pick }, 'Cambiar'))) : h('button', { class: 'btn', id: 'pick-src', onclick: pick }, 'Elegir foto original del producto'));
   async function pick() { const a = await pickAsset({ kinds: ['product', 'photo', 'material', 'other', 'logo', 'generated'], brandId: null, title: 'Foto original' }); if (a) { st.src = a; drawSrc(); } }
+  const drawSrc = () => srcBox.replaceChildren(st.src ? h('div', { class: 'row' }, h('img', { src: st.src.thumb_url, style: { width: '72px', height: '72px', objectFit: 'contain', borderRadius: '8px', background: '#f0f1f7' }, alt: '' }), h('div', {}, h('div', { class: 'small' }, st.src.name), h('button', { class: 'btn sm', onclick: pick }, 'Cambiar'))) : h('button', { class: 'btn', id: 'pick-src', onclick: pick }, 'Elegir foto original del producto'));
   drawSrc();
   const fmt = h('select', { id: 'fmt' }, Object.entries(S.formats).map(([k, f]) => h('option', { value: k }, f.label)));
-  const provSeg = h('div', { class: 'seg' }); const mode = h('select', { id: 'mode' }, h('option', { value: 'text2img' }, 'Crear desde texto'), h('option', { value: 'edit' }, 'Editar la foto con IA'));
   const bgType = h('select', { id: 'bgtype' }, h('option', { value: 'solid' }, 'Color liso'), h('option', { value: 'gradient' }, 'Degradado'));
   const bc = (b?.colors || []).map((c) => c.hex);
-  const c1 = h('input', { type: 'color', id: 'c1', value: bc[1] && /^#[0-9a-f]{6}$/i.test(bc[1]) ? bc[1] : '#ffffff' }), c2 = h('input', { type: 'color', id: 'c2', value: '#dbe7ff' });
+  const c1 = h('input', { type: 'color', id: 'c1', value: bc[0] && /^#[0-9a-f]{6}$/i.test(bc[0]) ? bc[0] : '#ffffff' }), c2 = h('input', { type: 'color', id: 'c2', value: '#dbe7ff' });
   const head = h('input', { type: 'text', id: 'headline', placeholder: 'Ej. Tóner para su impresora' }), sub = h('input', { type: 'text', id: 'subline', placeholder: 'Opcional' });
   const useLogo = h('input', { type: 'checkbox', id: 'uselogo', checked: Boolean(b?.logo), disabled: !b?.logo });
-  const prompt = h('textarea', { id: 'prompt', placeholder: 'Describa la imagen que quiere crear (escenario, estilo, luz…)' });
+
+  // --- asistente de textos (Ollama) ---
+  const suggestOut = h('div');
+  const aiNotes = h('textarea', { id: 'ai-notes', placeholder: 'Lo que usted sabe del producto: nombre, uso, para quién… (la IA no inventará precios ni características)' });
+  const aiModel = modelSel('ai-model', textModels.length ? textModels : models); const aiImg = h('input', { type: 'checkbox', id: 'ai-img' });
+  async function suggest() {
+    suggestOut.replaceChildren(h('p', { class: 'muted small' }, 'Pensando… (depende de su equipo)'));
+    try {
+      const r = await api('POST', '/api/ai/suggest-copy', { brand_id: b?.id, model: aiModel.value, notes: aiNotes.value, source_asset_id: st.src?.id, use_image: aiImg.checked && Boolean(st.src) });
+      suggestOut.replaceChildren(...r.options.map((o) => h('div', { class: 'card', style: { padding: '10px', marginTop: '8px' } }, h('b', {}, o.titular), h('div', { class: 'small muted' }, o.apoyo),
+        h('button', { class: 'btn sm', style: { marginTop: '6px' }, onclick: () => { head.value = o.titular; sub.value = o.apoyo; toast('Texto aplicado. Revíselo antes de generar.', 'ok'); } }, 'Usar este'))),
+        h('p', { class: 'small muted' }, `Modelo: ${r.model}.${r.discarded ? ` Se descartaron ${r.discarded} opción(es) con cifras que usted no entregó.` : ''} Revise siempre los textos.`));
+    } catch (e) { suggestOut.replaceChildren(); fail(e); }
+  }
+  const assistant = oll.configured
+    ? h('details', { style: { marginTop: '12px' }, open: true }, h('summary', { style: { cursor: 'pointer', fontWeight: 600 } }, 'Asistente de textos (Ollama, gratis y local)'),
+      h('label', {}, 'Notas del producto'), aiNotes, h('label', {}, 'Modelo'), aiModel,
+      h('label', { class: 'row', style: { fontWeight: 400 } }, aiImg, 'Que la IA mire la foto (solo modelos con visión, ej. llava)'),
+      h('div', { style: { marginTop: '8px' } }, h('button', { class: 'btn', id: 'ai-go', onclick: suggest }, 'Sugerir textos')), suggestOut)
+    : h('div', { class: 'note', style: { marginTop: '12px' } }, `Asistente de textos no disponible: ${oll.note} Vea Conectores para instalarlo (gratis).`);
+
   const localBox = h('div', {}, h('label', {}, 'Fondo'), h('div', { class: 'row' }, bgType, c1, c2), h('label', {}, 'Titular'), head, h('label', {}, 'Texto de apoyo'), sub,
-    h('label', { class: 'row', style: { fontWeight: 400 } }, useLogo, b?.logo ? 'Incluir logo oficial' : 'Incluir logo (la marca no tiene logo cargado)'));
-  const aiBox = h('div', {}, h('label', {}, 'Tipo'), mode, h('label', {}, 'Descripción'), prompt,
-    h('div', { class: 'note', style: { marginTop: '10px' } }, 'La IA puede alterar el producto, sus etiquetas o su envase. Para conservar el producto tal cual use «Composición local». Siempre compare con el original antes de aprobar.'));
-  const aiNote = h('div', { class: oa.configured ? 'note info' : 'note' }, oa.configured ? `OpenAI activo. ${oa.note} Se le pedirá confirmación antes de cada generación.` : `Conector OpenAI no configurado: ${oa.note}`);
+    h('label', { class: 'row', style: { fontWeight: 400 } }, useLogo, b?.logo ? 'Incluir logo oficial' : 'Incluir logo (la marca no tiene logo cargado)'), assistant);
+
+  // --- IA de imagen local ---
+  const ollModel = modelSel('oll-model', imgModels.length ? imgModels : models), ollPrompt = h('textarea', { id: 'oll-prompt', placeholder: 'Describa la imagen (escenario, estilo, luz…)' });
+  const ollBox = h('div', {}, h('div', { class: 'note' }, 'Generación de imagen de Ollama: función EXPERIMENTAL (nació en macOS; en otros sistemas puede no estar disponible). Si falla, use Stable Diffusion o la composición local.'),
+    h('label', {}, 'Modelo de imagen instalado'), ollModel, h('label', {}, 'Descripción'), ollPrompt);
+  const sdMode = h('select', { id: 'sd-mode' }, h('option', { value: 'text2img' }, 'Crear desde texto'), h('option', { value: 'edit' }, 'Variar la foto original (img2img)')), sdPrompt = h('textarea', { id: 'sd-prompt', placeholder: 'Describa la imagen…' }), sdNeg = h('input', { type: 'text', id: 'sd-neg', placeholder: 'Opcional: borroso, deformado, texto ilegible' });
+  const sdBox = h('div', {}, h('label', {}, 'Tipo'), sdMode, h('label', {}, 'Descripción'), sdPrompt, h('label', {}, 'Evitar'), sdNeg);
+  const aiWarn = h('div', { class: 'note', style: { marginTop: '10px' } }, 'La IA puede alterar el producto, sus etiquetas o su envase. Para conservar el producto tal cual use «Composición local». Compare siempre con el original antes de aprobar.');
+
+  const NOTES = {
+    'local-compose': h('div', { class: 'note info' }, 'Gratis. Conserva su foto original intacta (solo la escala).'),
+    'ollama-image': h('div', { class: oll.configured ? 'note info' : 'note' }, oll.configured ? `Ollama conectado. ${oll.note}` : `Ollama no disponible: ${oll.note}`),
+    'sd-webui': h('div', { class: sd.configured ? 'note info' : 'note' }, sd.configured ? sd.note : `Stable Diffusion no disponible: ${sd.note}`),
+  };
+  const provSeg = h('div', { class: 'seg' }); const dyn = h('div');
   const mkSeg = () => {
-    provSeg.replaceChildren(
-      h('button', { class: st.provider === 'local-compose' ? 'on' : '', id: 'prov-local', onclick: () => { st.provider = 'local-compose'; mkSeg(); } }, 'Composición local (gratis)'),
-      h('button', { class: st.provider === 'openai-images' ? 'on' : '', id: 'prov-ai', onclick: () => { st.provider = 'openai-images'; mkSeg(); } }, 'IA OpenAI (de pago)'));
-    const ai = st.provider === 'openai-images';
-    localBox.style.display = ai ? 'none' : ''; aiBox.style.display = ai ? '' : 'none'; aiNote.style.display = ai ? '' : 'none';
+    const btn = (id, label, key) => h('button', { class: st.provider === key ? 'on' : '', id, onclick: () => { st.provider = key; mkSeg(); } }, label);
+    provSeg.replaceChildren(btn('prov-local', 'Composición local', 'local-compose'), btn('prov-oll', 'IA: Ollama', 'ollama-image'), btn('prov-sd', 'IA: Stable Diffusion', 'sd-webui'));
+    dyn.replaceChildren(NOTES[st.provider], st.provider === 'local-compose' ? localBox : st.provider === 'ollama-image' ? [ollBox, aiWarn] : [sdBox, aiWarn]);
   };
   mkSeg();
   const genBtn = h('button', { class: 'btn p', id: 'gen', onclick: () => generate() }, 'Generar');
 
-  async function generate(confirmed = false) {
-    const body = { brand_id: b?.id, provider: st.provider, mode: mode.value, source_asset_id: st.src?.id, format: fmt.value, prompt: prompt.value, bg_type: bgType.value, bg_colors: [c1.value, c2.value], headline: head.value, subline: sub.value, use_logo: useLogo.checked, confirm_cost: confirmed || undefined };
-    genBtn.disabled = true; genBtn.textContent = 'Generando…';
-    try {
-      const a = await api('POST', '/api/images/generate', body); st.last = a; showResult(a);
-    } catch (e) {
-      if (e.status === 409 && e.data?.needs_confirmation) { if (await confirmModal(e.message + ' ¿Desea continuar?', 'Sí, generar')) { genBtn.disabled = false; return generate(true); } } else fail(e);
-    } finally { genBtn.disabled = false; genBtn.textContent = 'Generar'; }
+  async function generate() {
+    const body = { brand_id: b?.id, provider: st.provider, source_asset_id: st.src?.id, format: fmt.value };
+    if (st.provider === 'local-compose') Object.assign(body, { bg_type: bgType.value, bg_colors: [c1.value, c2.value], headline: head.value, subline: sub.value, use_logo: useLogo.checked });
+    else if (st.provider === 'ollama-image') Object.assign(body, { model: ollModel.value, prompt: ollPrompt.value });
+    else Object.assign(body, { mode: sdMode.value, prompt: sdPrompt.value, negative: sdNeg.value });
+    genBtn.disabled = true; genBtn.textContent = 'Generando… (la IA local puede tardar)';
+    try { const a = await api('POST', '/api/images/generate', body); st.last = a; showResult(a); }
+    catch (e) { fail(e); } finally { genBtn.disabled = false; genBtn.textContent = 'Generar'; }
   }
   async function setStatus(a, status) { try { const u = await api('PATCH', `/api/assets/${a.id}`, { status }); st.last = u; showResult(u); toast(status === 'approved' ? 'Imagen aprobada' : 'Imagen rechazada', 'ok'); } catch (e) { fail(e); } }
   async function toEditor(a) {
@@ -212,15 +245,15 @@ async function pImages() {
   function showResult(a) {
     out.replaceChildren(h('div', { class: 'card' }, h('div', { class: 'row', style: { justifyContent: 'space-between' } }, h('h2', {}, 'Resultado'), statusBadge(a.status)),
       h('div', { class: 'cmp' }, st.src ? h('figure', {}, h('figcaption', {}, 'ORIGINAL'), h('img', { src: st.src.url, alt: 'original' })) : null, h('figure', {}, h('figcaption', {}, 'RESULTADO'), h('img', { id: 'result-img', src: a.url, alt: 'resultado' }))),
-      a.meta.productModified && a.meta.productModified !== false ? h('div', { class: 'note', style: { marginTop: '10px' } }, `Producto: ${a.meta.productModified}`) : h('p', { class: 'small muted' }, 'El producto no fue modificado (solo escalado proporcionalmente).'),
+      a.meta.productModified ? h('div', { class: 'note', style: { marginTop: '10px' } }, `Producto: ${a.meta.productModified}`) : h('p', { class: 'small muted' }, a.source === 'local-compose' ? 'El producto no fue modificado (solo escalado proporcionalmente).' : 'Imagen creada desde texto: no contiene su producto real.'),
       h('div', { class: 'row', style: { marginTop: '12px' } },
         h('button', { class: 'btn ok', id: 'approve-img', onclick: () => setStatus(a, 'approved') }, 'Aprobar'), h('button', { class: 'btn bad', onclick: () => setStatus(a, 'rejected') }, 'Rechazar'),
         h('button', { class: 'btn', onclick: () => generate() }, 'Volver a generar'), h('a', { class: 'btn', href: `/api/assets/${a.id}/download` }, 'Descargar'),
         h('button', { class: 'btn p', disabled: a.status !== 'approved', title: a.status !== 'approved' ? 'Apruebe la imagen para usarla en un diseño' : '', onclick: () => toEditor(a) }, 'Abrir en el editor'))));
   }
-  return h('div', {}, h('h1', {}, 'Generador de imágenes'), h('p', { class: 'muted' }, `Marca: ${b?.name || '—'}. Nada se exporta ni publica sin su aprobación.`),
+  return h('div', {}, h('h1', {}, 'Generador de imágenes'), h('p', { class: 'muted' }, `Marca: ${b?.name || '—'}. Motores gratuitos y locales. Nada se exporta ni publica sin su aprobación.`),
     h('div', { class: 'grid g2', style: { marginTop: '12px', alignItems: 'start' } },
-      h('div', { class: 'card' }, h('label', {}, 'Método'), provSeg, aiNote, h('label', {}, 'Foto original'), srcBox, h('label', {}, 'Formato'), fmt, localBox, aiBox, h('div', { style: { marginTop: '14px' } }, genBtn)), out));
+      h('div', { class: 'card' }, h('label', {}, 'Motor'), provSeg, h('label', {}, 'Foto original'), srcBox, h('label', {}, 'Formato'), fmt, dyn, h('div', { style: { marginTop: '14px' } }, genBtn)), out));
 }
 
 // ----- Diseño gráfico (inicio) y proyectos -----
@@ -294,27 +327,36 @@ async function pLibrary() {
 }
 
 // ----- Conectores -----
+const HOWTO = {
+  ollama: ['1. Instale Ollama desde ollama.com (gratis) e inícielo.', '2. Descargue un modelo de texto, p. ej.: ollama pull <modelo>   (para ver fotos use un modelo con visión).', '3. Recargue esta página: aparecerán los modelos instalados.', 'Imágenes con Ollama es EXPERIMENTAL (hoy nació en macOS). Si no está disponible en su sistema, use Stable Diffusion.'],
+  'sd-webui': ['1. Instale Stable Diffusion WebUI (AUTOMATIC1111, Forge o SD.Next) e inícielo con la opción --api.', '2. Defina en .env: SD_WEBUI_URL=http://127.0.0.1:7860', '3. Reinicie Estudio Creativo IA. Requiere GPU para velocidad razonable.'],
+};
 const COMPARE = [
-  ['OpenAI Images (gpt-image-1)', 'Imagen desde texto y edición', 'Sí (integrado)', 'Pago por uso — ver openai.com/api/pricing', 'Según nivel de cuenta; puede requerir verificación de organización', 'Alta', 'Buen manejo de texto; edita con imagen de referencia', 'Puede alterar productos/etiquetas; de pago'],
-  ['Composición local (sharp)', 'Fondo de marca, escalado, texto y logo sobre la foto original', 'No aplica (local)', 'Gratis', 'Sin límites externos', 'Fiel al original', 'Conserva el producto intacto; sin costo', 'No crea escenas nuevas ni quita fondos'],
-  ['Quitar fondos: rembg / modelos open source', 'Eliminación de fondo', 'Local (librería)', 'Gratis (usa su CPU/GPU)', 'Depende de su servidor', 'Buena en objetos simples', 'Sin costo por imagen', 'Por integrar en Fase 2; requiere Python o modelo ONNX'],
-  ['Servicios de quitar fondo por API (ej. remove.bg)', 'Eliminación de fondo', 'Sí', 'VERIFICAR (créditos/planes)', 'VERIFICAR', 'Alta', 'Rápido y simple', 'Costo por imagen; no integrado'],
-  ['Runway (API)', 'Video desde texto/imagen', 'Sí (API para desarrolladores)', 'VERIFICAR (créditos)', 'VERIFICAR', 'Alta', 'Anima fotos de producto', 'De pago; no integrado. Evaluar antes de Fase 2'],
-  ['FFmpeg', 'Montaje, cortes, subtítulos, conversión MP4', 'Local', 'Gratis (software libre)', 'Su servidor', 'Profesional', 'Control total, sin suscripción', 'Requiere instalarlo; Fase 2'],
-  ['OpenAI Audio (voz/transcripción)', 'Texto a voz, subtítulos', 'Sí', 'Pago por uso — VERIFICAR', 'Según cuenta', 'Alta', 'Una sola cuenta con imágenes', 'De pago; no integrado (Fase 3)'],
-  ['Música IA comercial', 'Música de fondo', 'VERIFICAR por proveedor', 'VERIFICAR', 'VERIFICAR licencia comercial', '—', '—', 'No se usará ningún proveedor sin confirmar API oficial y licencia comercial'],
-  ['Instagram Graph API / Meta', 'Publicar y medir', 'Sí', 'Gratis (la API)', 'Cuenta profesional, app y permisos revisados por Meta', '—', 'Publicación directa', 'Revisión de app; Fase 4'],
-  ['Google Ads API', 'Campañas y anuncios', 'Sí', 'Gratis (la API; la publicidad se paga aparte)', 'Developer token aprobado por Google', '—', 'Gestión desde la plataforma', 'Aprobación de Google; Fase 4'],
+  ['Composición local (sharp)', 'Foto original + fondo de marca + texto + logo', 'No aplica (integrado)', 'Gratis', 'Ninguno externo', 'Fiel al original', 'Conserva el producto intacto', 'No crea escenas nuevas ni quita fondos'],
+  ['Ollama (modelos locales)', 'Textos (asistente), visión de fotos; imagen experimental', 'Sí, local (integrado)', 'Gratis', 'Los define su equipo (memoria/GPU)', 'Según el modelo', 'Privado, sin internet, sin cuotas', 'Imagen experimental; licencia distinta por modelo'],
+  ['Stable Diffusion WebUI', 'Imagen desde texto / variación de foto', 'Sí, local (integrado)', 'Gratis (software libre)', 'Su GPU', 'Buena con buen modelo', 'Muchos modelos abiertos', 'Pide GPU; revisar licencia del modelo; puede alterar productos'],
+  ['ComfyUI', 'Flujos de imagen avanzados', 'Sí, local', 'Gratis', 'Su GPU', 'Alta', 'Muy flexible', 'No integrado aún (Fase 2)'],
+  ['rembg / modelos de recorte', 'Quitar fondos', 'Local (librería)', 'Gratis', 'Su equipo', 'Buena en objetos simples', 'Sin costo por imagen', 'No integrado aún (Fase 2)'],
+  ['FFmpeg', 'Montaje, cortes, subtítulos, MP4', 'Local', 'Gratis (software libre)', 'Su equipo', 'Profesional', 'Control total', 'No integrado aún (Fase 2)'],
+  ['Whisper (local)', 'Subtítulos desde audio', 'Local', 'Gratis (modelos abiertos)', 'Su equipo', 'Alta', 'Sin cuotas', 'No integrado aún (Fase 2)'],
+  ['Texto a voz local (ej. Piper)', 'Locuciones en español', 'Local', 'Gratis', 'Su equipo', 'Buena', 'Sin cuotas', 'VERIFICAR licencia de la voz/motor para uso comercial (Fase 3)'],
+  ['Música', 'Fondo musical', 'Local o biblioteca libre', 'Gratis', '—', '—', '—', 'VERIFICAR licencia comercial: algunos modelos abiertos solo permiten uso no comercial'],
+  ['Instagram Graph API / Google Ads API', 'Publicar y gestionar campañas', 'Sí (APIs gratuitas)', 'API gratuita; la publicidad se paga aparte', 'Aprobación de Meta / Google', '—', 'Publicación desde la plataforma', 'Requiere cuentas y permisos aprobados (Fase 4)'],
 ];
 async function pConnectors() {
   const { active, planned } = await api('GET', '/api/connectors');
-  return h('div', {}, h('h1', {}, 'Conectores'), h('p', { class: 'muted' }, 'Cada servicio es un módulo independiente: se puede cambiar de proveedor sin rehacer la plataforma. Nada se simula: sin credenciales, el estado es «no configurado».'),
-    h('div', { class: 'grid g2', style: { marginTop: '12px' } }, active.map((c) => h('div', { class: 'card' }, h('div', { class: 'row', style: { justifyContent: 'space-between' } }, h('h3', {}, c.label), h('span', { class: `badge ${c.configured ? 'ok' : 'warn'}` }, c.configured ? 'Activo' : 'No configurado')),
-      h('p', { class: 'small' }, c.note), h('p', { class: 'small muted' }, h('b', {}, 'Costo: '), c.info.cost), h('p', { class: 'small muted' }, h('b', {}, 'Límites: '), c.info.limits), h('a', { class: 'small', href: c.info.docs, target: '_blank', rel: 'noopener' }, 'Documentación oficial'), c.paid ? h('p', { class: 'small' }, h('span', { class: 'badge warn' }, 'De pago por uso')) : null))),
+  return h('div', {}, h('h1', {}, 'Conectores'), h('p', { class: 'muted' }, 'Motores gratuitos y de código abierto que corren en su equipo. Cada uno es un módulo independiente: se pueden sumar o cambiar sin rehacer la plataforma. Nada se simula: si un motor no responde, aparece «No disponible».'),
+    h('div', { class: 'note info', style: { margin: '12px 0' } }, 'Política: no hay servicios de pago activados. Ningún servicio de pago se incorpora sin su autorización expresa.'),
+    h('div', { class: 'grid g2', style: { marginTop: '12px' } }, active.map((c) => h('div', { class: 'card' }, h('div', { class: 'row', style: { justifyContent: 'space-between' } }, h('h3', {}, c.label), h('span', { class: `badge ${c.configured ? 'ok' : 'warn'}` }, c.configured ? 'Disponible' : 'No disponible')),
+      h('p', { class: 'small' }, c.note),
+      c.models?.length ? h('p', { class: 'small' }, h('b', {}, 'Modelos instalados: '), c.models.map((m) => m.name).join(', ')) : null,
+      h('p', { class: 'small muted' }, h('b', {}, 'Costo: '), c.info.cost), h('p', { class: 'small muted' }, h('b', {}, 'Límites: '), c.info.limits),
+      !c.configured && HOWTO[c.id] ? h('details', {}, h('summary', { style: { cursor: 'pointer', fontWeight: 600 } }, 'Cómo activarlo'), h('ul', { class: 'small' }, HOWTO[c.id].map((x) => h('li', {}, x)))) : null,
+      h('a', { class: 'small', href: c.info.docs, target: '_blank', rel: 'noopener' }, 'Documentación oficial')))),
     h('h2', { style: { marginTop: '24px' } }, 'Próximos conectores (aún no integrados)'),
     h('div', { class: 'card tablewrap' }, h('table', {}, h('thead', {}, h('tr', {}, ['Servicio', 'Categoría', 'Fase', 'Nota'].map((x) => h('th', {}, x)))), h('tbody', {}, planned.map((p) => h('tr', {}, h('td', {}, p.label), h('td', {}, p.category), h('td', {}, `Fase ${p.phase}`), h('td', {}, p.note)))))),
-    h('h2', { style: { marginTop: '24px' } }, 'Comparativa de proveedores'),
-    h('div', { class: 'note', style: { marginBottom: '10px' } }, 'Tabla orientativa elaborada SIN consultar precios en vivo. Donde dice VERIFICAR el dato debe confirmarse en el sitio oficial antes de integrar o contratar. No se contrata ni activa ningún servicio de pago sin su autorización.'),
+    h('h2', { style: { marginTop: '24px' } }, 'Comparativa de motores gratuitos'),
+    h('div', { class: 'note', style: { marginBottom: '10px' } }, 'Tabla orientativa. Donde dice VERIFICAR, confirme la licencia en el sitio oficial antes de uso comercial. Los modelos de IA tienen licencias distintas: algunos prohíben el uso comercial.'),
     h('div', { class: 'card tablewrap' }, h('table', {}, h('thead', {}, h('tr', {}, ['Servicio', 'Funciones', 'API', 'Precio', 'Límites', 'Calidad', 'Ventajas', 'Desventajas'].map((x) => h('th', {}, x)))), h('tbody', {}, COMPARE.map((r) => h('tr', {}, r.map((c) => h('td', {}, c))))))));
 }
 

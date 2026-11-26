@@ -10,6 +10,7 @@ const { openDb, j } = require('./db');
 const { hashPassword, verifyPassword, makeAuth } = require('./auth');
 const { FORMATS } = require('./formats');
 const connectors = require('./connectors');
+const { suggestCopy } = require('./ai');
 
 const httpErr = (status, msg) => Object.assign(new Error(msg), { status });
 const str = (v, max = 200) => String(v ?? '').trim().slice(0, max);
@@ -227,7 +228,7 @@ function createApp({ dataDir = path.join(process.cwd(), 'data'), env = process.e
     const src = b.source_asset_id ? getAsset(b.source_asset_id) : null;
     if (b.source_asset_id && !src) throw httpErr(404, 'La imagen original no existe.');
     const baseMeta = { provider, format: b.format, headline: str(b.headline, 120), subline: str(b.subline, 200), prompt: str(b.prompt, 1500) };
-    let result, cost = null, meta;
+    let result, cost = 0, meta;
 
     if (provider === 'local-compose') {
       if (!src) throw httpErr(400, 'Seleccione la fotografía original del producto.');
@@ -240,19 +241,26 @@ function createApp({ dataDir = path.join(process.cwd(), 'data'), env = process.e
       result = await connectors.get('local-compose').compose({ width: w, height: h, productBuffer: readAssetBuffer(src), logoBuffer, bg, headline: str(b.headline, 120), subline: str(b.subline, 200), textColor, font: brand?.fonts ? (j(brand.fonts, {}).titulos || 'sans-serif') : 'sans-serif', layout: b.layout });
       meta = { ...baseMeta, ...result.meta, bg, logoUsed: !!logoBuffer };
       cost = 0;
-    } else if (provider === 'openai-images') {
-      const c = connectors.get('openai-images');
-      if (!env.OPENAI_API_KEY) throw httpErr(400, 'El conector OpenAI no está configurado (falta OPENAI_API_KEY en el servidor).');
+    } else if (provider === 'ollama-image' || provider === 'sd-webui') {
+      // Motores de IA locales y gratuitos (Ollama experimental / Stable Diffusion WebUI).
       const prompt = str(b.prompt, 1500); if (!prompt) throw httpErr(400, 'Escriba la descripción de la imagen.');
-      const mode = b.mode === 'edit' ? 'edit' : 'text2img';
-      if (mode === 'edit' && !src) throw httpErr(400, 'Para editar, seleccione la imagen original.');
-      const est = c.estimate(env);
-      if (b.confirm_cost !== true) {
-        return res.status(409).json({ needs_confirmation: true, estimated_cost_usd: est, error: est ? `Esta generación es de pago. Costo estimado configurado: US$ ${est}.` : 'Esta generación es de pago por uso en su cuenta de OpenAI (costo no configurado). Confirme para continuar.' });
+      const negative = str(b.negative, 500);
+      if (provider === 'ollama-image') {
+        const model = str(b.model, 100); if (!model) throw httpErr(400, 'Elija un modelo de imagen de Ollama.');
+        result = await connectors.get('ollama').generateImage({ env, model, prompt, width: w, height: h });
+        meta = { ...baseMeta, model, experimental: true, productModified: false };
+      } else {
+        const sd = connectors.get('sd-webui');
+        if (b.mode === 'edit') {
+          if (!src) throw httpErr(400, 'Para editar, seleccione la imagen original.');
+          result = await sd.img2img({ env, prompt, negative, width: w, height: h, imageBuffer: readAssetBuffer(src) });
+          meta = { ...baseMeta, mode: 'edit', productModified: 'posible: la IA puede alterar el producto; compare con el original' };
+        } else {
+          result = await sd.txt2img({ env, prompt, negative, width: w, height: h });
+          meta = { ...baseMeta, mode: 'text2img', productModified: false };
+        }
       }
-      result = mode === 'edit' ? await c.editImage({ prompt, width: w, height: h, imageBuffer: readAssetBuffer(src), env }) : await c.textToImage({ prompt, width: w, height: h, env });
-      cost = est;
-      meta = { ...baseMeta, mode, productModified: mode === 'edit' ? 'posible: la IA puede alterar el producto; compare con el original' : false };
+      cost = 0;
     } else throw httpErr(400, 'Proveedor no válido.');
 
     const asset = await saveAsset({
@@ -263,6 +271,20 @@ function createApp({ dataDir = path.join(process.cwd(), 'data'), env = process.e
     logUsage(provider, 'image.generate', cost);
     audit(req.user.id, 'image.generate', `${provider} ${b.format}`);
     res.json(assetOut(asset));
+  });
+
+  // ---------- asistente de textos con IA local (Ollama) ----------
+  app.post('/api/ai/suggest-copy', async (req, res) => {
+    const b = req.body || {};
+    const brand = b.brand_id ? getBrand(b.brand_id) : null;
+    const src = b.source_asset_id ? getAsset(b.source_asset_id) : null;
+    const out = await suggestCopy({
+      env, model: str(b.model, 100), brand: brand ? { name: brand.name, business: j(brand.business, {}), style: brand.style } : null,
+      notes: str(b.notes, 1500), imageBuffer: b.use_image && src ? readAssetBuffer(src) : null,
+    });
+    logUsage('ollama', 'text.suggest');
+    audit(req.user.id, 'ai.suggest', out.model);
+    res.json(out);
   });
 
   // ---------- diseños ----------
@@ -386,13 +408,13 @@ function createApp({ dataDir = path.join(process.cwd(), 'data'), env = process.e
   });
 
   // ---------- conectores, consumo, panel ----------
-  app.get('/api/connectors', (req, res) => res.json({ active: connectors.list(env), planned: connectors.planned }));
+  app.get('/api/connectors', async (req, res) => res.json({ active: await connectors.list(env), planned: connectors.planned }));
   app.get('/api/usage', (req, res) => res.json(usageSummary()));
   function usageSummary() {
-    const rows = db.prepare(`SELECT connector, COUNT(*) ops, SUM(cost_usd) known_cost, SUM(CASE WHEN cost_usd IS NULL THEN 1 ELSE 0 END) unknown_ops FROM usage_log GROUP BY connector`).all();
-    return rows.map((r) => ({ connector: r.connector, ops: r.ops, known_cost_usd: r.known_cost || 0, ops_without_cost: r.unknown_ops }));
+    // Todos los conectores incluidos son gratuitos: solo se cuenta el uso.
+    return db.prepare('SELECT connector, COUNT(*) ops FROM usage_log GROUP BY connector').all();
   }
-  app.get('/api/dashboard', (req, res) => {
+  app.get('/api/dashboard', async (req, res) => {
     const c = (sql) => db.prepare(sql).get().c;
     res.json({
       counts: {
@@ -407,7 +429,7 @@ function createApp({ dataDir = path.join(process.cwd(), 'data'), env = process.e
       recent_images: db.prepare("SELECT * FROM assets WHERE kind='generated' ORDER BY id DESC LIMIT 6").all().map(assetOut),
       recent_exports: db.prepare("SELECT * FROM assets WHERE kind='export' ORDER BY id DESC LIMIT 6").all().map(assetOut),
       pending_designs: db.prepare("SELECT * FROM designs WHERE is_template=0 AND status<>'approved' ORDER BY updated_at DESC LIMIT 6").all().map((d) => designOut(d)),
-      connectors_active: connectors.list(env).filter((x) => x.configured).map((x) => x.label),
+      connectors_active: (await connectors.list(env)).filter((x) => x.configured).map((x) => x.label),
       usage: usageSummary(),
     });
   });
@@ -428,7 +450,8 @@ function createApp({ dataDir = path.join(process.cwd(), 'data'), env = process.e
     let status = err.status || 500, msg = err.message;
     if (err instanceof multer.MulterError) { status = 400; msg = err.code === 'LIMIT_FILE_SIZE' ? 'El archivo supera 25 MB.' : err.message; }
     if (err.type === 'entity.too.large') { status = 413; msg = 'La solicitud es demasiado grande.'; }
-    if (status >= 500) { console.error('[error]', err); msg = 'Error interno del servidor.'; }
+    // Los errores de servicios externos (502/503/504) llevan un mensaje claro y deliberado; solo se oculta el 500 inesperado.
+    if (status === 500) { console.error('[error]', err); msg = 'Error interno del servidor.'; }
     res.status(status).json({ error: msg });
   });
 

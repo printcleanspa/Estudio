@@ -30,16 +30,31 @@ function upload(buf, fields) {
 
 test.before(async () => {
   dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'estudio-test-'));
-  // Servidor falso de OpenAI (SOLO pruebas): comprueba que el conector arma bien las peticiones.
+  // Servidores FALSOS de Ollama y Stable Diffusion (SOLO pruebas): replican la forma de sus APIs para verificar nuestras peticiones.
   stub = http.createServer(async (req, res) => {
     const chunks = []; for await (const c of req) chunks.push(c);
-    stubHits.push({ url: req.url, auth: req.headers.authorization, ct: req.headers['content-type'], body: Buffer.concat(chunks).toString('latin1').slice(0, 2000) });
-    const img = await png(1024, 1024, '#3366cc');
+    const raw = Buffer.concat(chunks).toString('utf8'); let body = {}; try { body = JSON.parse(raw); } catch { /* sin cuerpo */ }
+    stubHits.push({ url: req.url, body });
+    const img = (await png(1024, 1024, '#3366cc')).toString('base64');
     res.setHeader('content-type', 'application/json');
-    res.end(JSON.stringify({ data: [{ b64_json: img.toString('base64') }] }));
+    if (req.url === '/api/tags') return res.end(JSON.stringify({ models: [{ name: 'llama-test:latest', size: 1 }, { name: 'x/flux-test', size: 2 }] }));
+    if (req.url === '/api/chat') {
+      if (body.model === 'no-existe') { res.statusCode = 404; return res.end(JSON.stringify({ error: 'model "no-existe" not found, try pulling it first' })); }
+      return res.end(JSON.stringify({ message: { content: JSON.stringify({ opciones: [
+        { titular: 'Tóner para su impresora', apoyo: 'Consulte disponibilidad' },
+        { titular: 'Oferta $9.990 hoy', apoyo: 'Solo esta semana' },            // cifra inventada → debe descartarse
+        { titular: 'Suministros para su oficina', apoyo: 'Atención a empresas' }] }) } }));
+    }
+    if (req.url === '/api/generate') { // NDJSON: progreso + última línea con la imagen
+      return res.end(JSON.stringify({ model: body.model, response: '', done: false }) + '\n' + JSON.stringify({ model: body.model, response: '', done: true, image: img }) + '\n');
+    }
+    if (req.url === '/sdapi/v1/sd-models') return res.end(JSON.stringify([{ title: 'm1' }]));
+    if (req.url === '/sdapi/v1/txt2img' || req.url === '/sdapi/v1/img2img') return res.end(JSON.stringify({ images: [img] }));
+    res.statusCode = 404; res.end('{}');
   });
   await new Promise((r) => stub.listen(0, r));
-  const env = { OPENAI_API_KEY: 'sk-test-fake', OPENAI_BASE_URL: `http://127.0.0.1:${stub.address().port}/v1`, OPENAI_IMAGE_COST_USD: '0.04' };
+  const u = `http://127.0.0.1:${stub.address().port}`;
+  const env = { OLLAMA_HOST: u, SD_WEBUI_URL: u, SD_WEBUI_MAX_SIDE: '512' };
   const app = createApp({ dataDir, env });
   server = http.createServer(app); await new Promise((r) => server.listen(0, r));
   base = `http://127.0.0.1:${server.address().port}`;
@@ -116,26 +131,50 @@ test('aprobación de imagen generada y validaciones', async () => {
   assert.equal((await api('POST', '/api/images/generate', { provider: 'local-compose', format: 'ig-1x1' })).status, 400);
 });
 
-test('OpenAI: exige confirmación de costo y luego llama a la API con la clave del servidor', async () => {
-  const body = { brand_id: brand.id, provider: 'openai-images', mode: 'text2img', prompt: 'Una oficina limpia', format: 'ig-story' };
-  const need = await api('POST', '/api/images/generate', body);
-  assert.equal(need.status, 409); assert.equal(need.data.needs_confirmation, true); assert.equal(need.data.estimated_cost_usd, 0.04);
-  assert.equal(stubHits.length, 0); // no se llamó a la API sin confirmación
-  const ok = await api('POST', '/api/images/generate', { ...body, confirm_cost: true });
-  assert.equal(ok.status, 200, JSON.stringify(ok.data));
-  assert.equal(ok.data.width, 1080); assert.equal(ok.data.height, 1920);
-  assert.equal(stubHits[0].url, '/v1/images/generations'); assert.equal(stubHits[0].auth, 'Bearer sk-test-fake');
-  // modo edición: multipart con la imagen
-  const ed = await api('POST', '/api/images/generate', { ...body, mode: 'edit', source_asset_id: productId, confirm_cost: true, format: 'ig-1x1' });
-  assert.equal(ed.status, 200); assert.equal(stubHits[1].url, '/v1/images/edits'); assert.match(stubHits[1].ct, /multipart\/form-data/);
-  assert.match(ed.data.meta.productModified, /posible/);
-  const usage = (await api('GET', '/api/usage')).data.find((u) => u.connector === 'openai-images');
-  assert.equal(usage.ops, 2); assert.ok(Math.abs(usage.known_cost_usd - 0.08) < 1e-9);
+test('Ollama: asistente de textos (visión incluida), descarta cifras inventadas y errores claros', async () => {
+  stubHits.length = 0;
+  const r = await api('POST', '/api/ai/suggest-copy', { brand_id: brand.id, model: 'llama-test:latest', notes: 'Tóner para impresoras láser', source_asset_id: productId, use_image: true });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.options.length, 2); assert.equal(r.data.discarded, 1);
+  assert.ok(r.data.options.every((o) => !/\d/.test(o.titular + o.apoyo)));
+  assert.equal(r.data.used_image, true);
+  const chat = stubHits.find((h) => h.url === '/api/chat').body;
+  assert.equal(chat.stream, false); assert.equal(chat.model, 'llama-test:latest');
+  assert.equal(chat.messages[1].images.length, 1);        // la foto viajó en base64 (visión)
+  assert.match(chat.messages[0].content, /NO inventes precios/);
+  assert.ok(chat.format && chat.format.type === 'object'); // salida estructurada
+  assert.equal((await api('POST', '/api/ai/suggest-copy', { notes: 'x' })).status, 400);                       // sin modelo
+  const nf = await api('POST', '/api/ai/suggest-copy', { model: 'no-existe', notes: 'x' });
+  assert.equal(nf.status, 400); assert.match(nf.data.error, /not found/);
 });
 
-test('conectores: estado real según variables de entorno', async () => {
+test('Ollama y Stable Diffusion generan imagen local, gratis, al tamaño exacto y quedan pendientes de aprobación', async () => {
+  stubHits.length = 0;
+  const o = await api('POST', '/api/images/generate', { brand_id: brand.id, provider: 'ollama-image', model: 'x/flux-test', prompt: 'Una oficina limpia', format: 'ig-story' });
+  assert.equal(o.status, 200, JSON.stringify(o.data));
+  assert.equal(o.data.width, 1080); assert.equal(o.data.height, 1920); assert.equal(o.data.status, 'pending'); assert.equal(o.data.meta.experimental, true);
+  const gen = stubHits.find((h) => h.url === '/api/generate').body;
+  assert.equal(gen.model, 'x/flux-test'); assert.equal(gen.stream, false); assert.equal(gen.width % 8, 0);
+  const t = await api('POST', '/api/images/generate', { brand_id: brand.id, provider: 'sd-webui', prompt: 'escritorio', negative: 'borroso', format: 'ig-1x1' });
+  assert.equal(t.status, 200); assert.equal(t.data.width, 1080);
+  const sd = stubHits.find((h) => h.url === '/sdapi/v1/txt2img').body;
+  assert.equal(sd.width, 512); assert.equal(sd.negative_prompt, 'borroso');   // límite SD_WEBUI_MAX_SIDE respetado
+  const e = await api('POST', '/api/images/generate', { brand_id: brand.id, provider: 'sd-webui', mode: 'edit', source_asset_id: productId, prompt: 'fondo claro', format: 'ig-4x5' });
+  assert.equal(e.status, 200); assert.ok(stubHits.some((h) => h.url === '/sdapi/v1/img2img' && h.body.init_images.length === 1));
+  assert.match(e.data.meta.productModified, /posible/);
+  assert.equal((await api('POST', '/api/images/generate', { provider: 'ollama-image', prompt: 'x', format: 'ig-1x1' })).status, 400); // sin modelo
+  assert.equal((await api('POST', '/api/images/generate', { provider: 'openai-images', prompt: 'x', format: 'ig-1x1' })).status, 400);  // OpenAI ya no existe
+  const usage = (await api('GET', '/api/usage')).data;
+  assert.ok(usage.find((u) => u.connector === 'sd-webui').ops >= 2);
+});
+
+test('conectores: todos gratuitos y con estado real (conectado / no disponible)', async () => {
   const c = (await api('GET', '/api/connectors')).data;
-  assert.equal(c.active.find((x) => x.id === 'openai-images').configured, true);
+  assert.ok(c.active.every((x) => x.paid === false));
+  assert.ok(!c.active.some((x) => /openai/i.test(x.id)));
+  const o = c.active.find((x) => x.id === 'ollama');
+  assert.equal(o.configured, true); assert.deepEqual(o.models.map((m) => m.name), ['llama-test:latest', 'x/flux-test']);
+  assert.equal(c.active.find((x) => x.id === 'sd-webui').configured, true);
   assert.ok(c.planned.length > 0 && c.planned.every((p) => p.phase >= 2));
 });
 
@@ -186,4 +225,20 @@ test('panel de inicio, usuarios y respaldo', async () => {
   assert.equal((await api('POST', '/api/users', { email: 'otro@test.cl', password: 'otraclave1234' })).status, 409);
   const b = await api('POST', '/api/backup');
   assert.equal(b.status, 200); assert.ok(fs.existsSync(path.join(dataDir, 'backups', b.data.file)));
+});
+
+test('sin Ollama ni Stable Diffusion: la plataforma sigue funcionando y los errores son claros', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'estudio-noai-'));
+  const app2 = http.createServer(createApp({ dataDir: dir, env: { OLLAMA_HOST: '127.0.0.1:1' } })); await new Promise((r) => app2.listen(0, r));
+  const b2 = `http://127.0.0.1:${app2.address().port}`; let ck = '';
+  const call = async (m, u, body) => { const r = await fetch(b2 + u, { method: m, headers: { cookie: ck, 'content-type': 'application/json' }, body: body && JSON.stringify(body) }); const sc = r.headers.get('set-cookie'); if (sc) ck = sc.split(';')[0]; return { status: r.status, data: await r.json() }; };
+  await call('POST', '/api/auth/register', { email: 'a@b.cl', password: 'clavesegura123' });
+  const c = (await call('GET', '/api/connectors')).data.active;
+  assert.equal(c.find((x) => x.id === 'local-compose').configured, true);
+  const o = c.find((x) => x.id === 'ollama'); assert.equal(o.configured, false); assert.match(o.note, /No se pudo conectar con Ollama/);
+  assert.equal(c.find((x) => x.id === 'sd-webui').configured, false);
+  const r = await call('POST', '/api/ai/suggest-copy', { model: 'x', notes: 'y' });
+  assert.equal(r.status, 503); assert.match(r.data.error, /Ollama/);
+  assert.equal((await call('GET', '/api/dashboard')).status, 200);
+  app2.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
