@@ -309,7 +309,7 @@ function createApp({ dataDir = path.join(process.cwd(), 'data'), env = process.e
         meta = { ...baseMeta, ...result.meta, line: b.line || null, logoUsed: !!logoBuffer, badge: b.badge_main || null };
         cost = 0;
       } else if (b.layout === 'card') {
-        result = await connectors.get('local-compose').composeCard({ width: w, height: h, photoBuffer: readAssetBuffer(src), logoBuffer, headline: str(b.headline, 120), subline: str(b.subline, 200), footerLines: cardFooter(brand, b.use_whatsapp, b.line), palette: cardPalette(brand), rotate: b.photo_rotate, zoom: b.photo_zoom, fx: b.focus_x, fy: b.focus_y });
+        result = await connectors.get('local-compose').composeCard({ width: w, height: h, photoBuffer: readAssetBuffer(src), logoBuffer, headline: str(b.headline, 120), subline: str(b.subline, 200), footerLines: cardFooter(brand, b.use_whatsapp, b.line), palette: cardPalette(brand), rotate: b.photo_rotate, zoom: b.photo_zoom, fx: b.focus_x, fy: b.focus_y, badgeTop: str(b.badge_top, 20), badgeMain: str(b.badge_main, 14), ribbon: str(b.ribbon, 18), compact: Boolean(b.compact) });
         meta = { ...baseMeta, ...result.meta, line: b.line || null, logoUsed: !!logoBuffer };
         cost = 0;
       } else {
@@ -363,7 +363,7 @@ function createApp({ dataDir = path.join(process.cwd(), 'data'), env = process.e
     const scenes = b.scenes.map((s0, i) => {
       const a = getAsset(s0?.asset_id);
       if (!a || !a.mime.startsWith('image/')) throw httpErr(400, `La escena ${i + 1} necesita una imagen de la biblioteca.`);
-      return { buffer: readAssetBuffer(a), seconds: Number(s0.seconds) || 3, caption: str(s0.caption, 90), asset: a, rotate: s0.rotate, zoom: s0.zoom, fx: s0.fx, fy: s0.fy, subcaption: str(s0.subcaption, 160), badgeTop: str(s0.badge_top, 20), badgeMain: str(s0.badge_main, 14), hideFooter: Boolean(s0.hide_footer) };
+      return { buffer: readAssetBuffer(a), seconds: Number(s0.seconds) || 3, caption: str(s0.caption, 90), asset: a, rotate: s0.rotate, zoom: s0.zoom, fx: s0.fx, fy: s0.fy, subcaption: str(s0.subcaption, 160), badgeTop: str(s0.badge_top, 20), badgeMain: str(s0.badge_main, 14), ribbon: str(s0.ribbon, 18), hideFooter: Boolean(s0.hide_footer) };
     });
     const audioOf = (id, label) => { if (!id) return null; const a = getAsset(id); if (!a || !a.mime.startsWith('audio/')) throw httpErr(400, `${label}: elija un audio de la biblioteca.`); return a; };
     const music = audioOf(b.music_asset_id, 'Música'), voice = audioOf(b.voice_asset_id, 'Voz');
@@ -384,7 +384,7 @@ function createApp({ dataDir = path.join(process.cwd(), 'data'), env = process.e
           env, scenes, format: fmt, draft: Boolean(b.draft), transition: b.transition === 'none' ? 'none' : 'fade', transitionSeconds: b.transition_seconds, motion: b.motion !== false,
           musicFile: music ? path.join(uploads, music.file) : null, musicVolume: vol(b.music_volume, voice ? 0.2 : 0.6), voiceFile: voice ? path.join(uploads, voice.file) : null, voiceVolume: vol(b.voice_volume, 1),
           style: { bg: { type: 'solid', colors: [bgColor] }, textColor: luma(bgColor) > 0.55 ? '#111111' : '#ffffff', font: (brand && j(brand.fonts, {}).titulos) || 'sans-serif', logoBuffer, footer,
-            card: b.layout === 'card' || b.layout === 'cutout' ? { mode: b.layout, footerLines: cardFooter(brand, b.use_whatsapp, b.line), palette: cardPalette(brand) } : null },
+            card: b.layout === 'card' || b.layout === 'cutout' ? { mode: b.layout, compact: Boolean(b.compact), footerLines: cardFooter(brand, b.use_whatsapp, b.line), palette: cardPalette(brand) } : null },
           onProgress: (p) => { job.progress = p; },
         });
         const warnings = [];

@@ -53,7 +53,7 @@ async function renderVideo(p) {
       const r = p.style.card && p.style.card.mode === 'cutout'
         ? await composeCutout({ width: W, height: H, cutoutBuffer: s.buffer, logoBuffer: p.style.logoBuffer, headline: s.caption || '', subline: s.subcaption || '', badgeTop: s.badgeTop, badgeMain: s.badgeMain, footerLines: s.hideFooter ? [] : p.style.card.footerLines, palette: p.style.card.palette })
         : p.style.card
-        ? await composeCard({ width: W, height: H, photoBuffer: s.buffer, logoBuffer: p.style.logoBuffer, headline: s.caption || '', subline: s.subcaption || '', footerLines: p.style.card.footerLines, palette: p.style.card.palette, rotate: s.rotate, zoom: s.zoom, fx: s.fx, fy: s.fy })
+        ? await composeCard({ width: W, height: H, photoBuffer: s.buffer, logoBuffer: p.style.logoBuffer, headline: s.caption || '', subline: s.subcaption || '', footerLines: s.hideFooter ? [] : p.style.card.footerLines, palette: p.style.card.palette, rotate: s.rotate, zoom: s.zoom, fx: s.fx, fy: s.fy, badgeTop: s.badgeTop, badgeMain: s.badgeMain, ribbon: s.ribbon, compact: Boolean(p.style.card.compact) })
         : await compose({ width: W, height: H, productBuffer: s.buffer, logoBuffer: p.style.logoBuffer, bg: p.style.bg, headline: s.caption || '', subline: '', footer: p.style.footer || '', textColor: p.style.textColor, font: p.style.font, layout: s.caption ? 'text-bottom' : 'center' });
       const f = path.join(tmp, `scene-${i}.png`); fs.writeFileSync(f, r.buffer); frames.push(f);
       if (i === 0) p.thumbBuffer = r.buffer;

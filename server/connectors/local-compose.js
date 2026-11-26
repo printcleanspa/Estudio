@@ -79,7 +79,7 @@ const FONT = "Inter, 'Segoe UI', Arial, Helvetica, sans-serif";
 function wrapText(text, maxChars) { return wrap(text, maxChars); }
 function roundedMask(w, h, r) { return Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><rect width="${w}" height="${h}" rx="${r}" ry="${r}" fill="#fff"/></svg>`); }
 
-async function composeCard({ width: W, height: H, photoBuffer, logoBuffer, headline, subline, footerLines, palette, rotate = 0, zoom = 1, fx = 0.5, fy = 0.5 }) {
+async function composeCard({ width: W, height: H, photoBuffer, logoBuffer, headline, subline, footerLines, palette, rotate = 0, zoom = 1, fx = 0.5, fy = 0.5, badgeTop, badgeMain, ribbon, compact = false }) {
   const navy = palette?.navy || '#023473', sky = palette?.sky || '#96dcfe';
   const m = Math.round(W * 0.045);
   const layers = [];
@@ -89,7 +89,7 @@ async function composeCard({ width: W, height: H, photoBuffer, logoBuffer, headl
     <path d="M0 ${H * 0.2} C ${W * 0.3} ${H * 0.12}, ${W * 0.55} ${H * 0.3}, ${W} ${H * 0.2} L ${W} ${H * 0.45} C ${W * 0.6} ${H * 0.35}, ${W * 0.3} ${H * 0.52}, 0 ${H * 0.42} Z" fill="#ffffff" opacity="0.28"/>
     <path d="M0 ${H * 0.62} C ${W * 0.35} ${H * 0.52}, ${W * 0.6} ${H * 0.75}, ${W} ${H * 0.6} L ${W} ${H} L 0 ${H} Z" fill="#ffffff" opacity="0.35"/></svg>`;
   // cabecera: logo + título
-  const logoSize = Math.round(W * 0.2);
+  const logoSize = Math.round(W * (compact ? 0.15 : 0.2));
   let headerBottom = m;
   if (logoBuffer) {
     const circle = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${logoSize}" height="${logoSize}"><circle cx="${logoSize / 2}" cy="${logoSize / 2}" r="${logoSize / 2}" fill="#fff"/></svg>`);
@@ -97,7 +97,7 @@ async function composeCard({ width: W, height: H, photoBuffer, logoBuffer, headl
     layers.push({ input: lg, left: m, top: m }); headerBottom = m + logoSize;
   }
   const tx = logoBuffer ? m + logoSize + Math.round(W * 0.04) : m, tw = W - m - tx;
-  const fs1 = Math.round(W * (logoBuffer ? 0.062 : 0.075)), fs2 = Math.round(fs1 * 0.5);
+  const fs1 = Math.round(W * (compact ? 0.056 : (logoBuffer ? 0.062 : 0.075))), fs2 = Math.round(fs1 * (compact ? 0.52 : 0.5));
   const l1 = wrapText(headline || '', Math.max(8, Math.floor(tw / (fs1 * 0.6)))).slice(0, 3);
   const l2 = wrapText(subline || '', Math.max(12, Math.floor(tw / (fs2 * 0.56)))).slice(0, 3);
   const blockH = l1.length * fs1 * 1.15 + (l2.length ? l2.length * fs2 * 1.3 + fs2 * 0.4 : 0);
@@ -110,12 +110,14 @@ async function composeCard({ width: W, height: H, photoBuffer, logoBuffer, headl
   // banda inferior
   let bandTop = H - m;
   if (footerLines && footerLines.length) {
-    const lines = footerLines.filter(Boolean);
-    const sizes = lines.map((_, i) => Math.round(W * (i === 1 ? 0.058 : 0.033)));
+    let lines = footerLines.filter(Boolean);
+    if (compact && lines.length === 3) lines = lines.slice(1);   // modo compacto: solo número + Instagram
+    const bigIdx = lines.length >= 3 ? 1 : 0;
+    const sizes = lines.map((_, i) => Math.round(W * (i === bigIdx ? 0.058 : 0.033)));
     const bh = Math.round(sizes.reduce((a, b) => a + b * 1.3, 0) + W * 0.05);
     const by = H - m - bh;
     let yy = by + W * 0.028; let t = '';
-    lines.forEach((ln, i) => { yy += sizes[i] * 1.02; t += `<text x="${W / 2}" y="${yy}" font-size="${sizes[i]}" font-weight="${i === 1 ? 800 : 700}" text-anchor="middle" fill="#fff" font-family="${esc(FONT)}">${esc(ln)}</text>`; yy += sizes[i] * 0.28; });
+    lines.forEach((ln, i) => { yy += sizes[i] * 1.02; t += `<text x="${W / 2}" y="${yy}" font-size="${sizes[i]}" font-weight="${i === bigIdx ? 800 : 700}" text-anchor="middle" fill="#fff" font-family="${esc(FONT)}">${esc(ln)}</text>`; yy += sizes[i] * 0.28; });
     txt += `<rect x="${m}" y="${by}" width="${W - 2 * m}" height="${bh}" rx="${Math.round(W * 0.045)}" fill="${esc(navy)}"/>` + t;
     bandTop = by;
   }
@@ -142,6 +144,15 @@ async function composeCard({ width: W, height: H, photoBuffer, logoBuffer, headl
   const shadow = await sharp({ create: { width: cw, height: chh, channels: 4, background: { r: 0, g: 20, b: 60, alpha: 0.38 } } }).composite([{ input: roundedMask(cw, chh, r + bord), blend: 'dest-in' }]).blur(Math.round(W * 0.012)).png().toBuffer();
   const frame = await sharp({ create: { width: cw, height: chh, channels: 4, background: '#ffffff' } }).composite([{ input: roundedMask(cw, chh, r + bord), blend: 'dest-in' }]).png().toBuffer();
   layers.push({ input: shadow, left: cx + Math.round(W * 0.006), top: cy + Math.round(W * 0.012) }, { input: frame, left: cx, top: cy }, { input: rounded, left: cx + bord, top: cy + bord });
+  if (badgeMain) {
+    const d = Math.round(W * 0.25), bxx = Math.round(W - m - d + W * 0.012), byy = Math.round(Math.min(bandTop - gap - d * 0.9, cy + chh - d * 0.6));
+    const f1 = Math.round(d * 0.17), f2 = Math.round(d * Math.min(0.27, 1.25 / String(badgeMain).length));
+    layers.push({ input: Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${d}" height="${d}"><circle cx="${d / 2}" cy="${d / 2}" r="${d / 2 - 4}" fill="${esc(navy)}" stroke="#ffffff" stroke-width="8"/>${badgeTop ? `<text x="${d / 2}" y="${d * 0.36}" font-size="${f1}" font-weight="700" text-anchor="middle" fill="#fff" font-family="${esc(FONT)}">${esc(badgeTop)}</text>` : ''}<text x="${d / 2}" y="${badgeTop ? d * 0.64 : d * 0.57}" font-size="${f2}" font-weight="800" text-anchor="middle" fill="#fff" font-family="${esc(FONT)}">${esc(badgeMain)}</text></svg>`), left: bxx, top: byy });
+  }
+  if (ribbon) {   // cinta de oferta sobre la esquina superior izquierda de la tarjeta
+    const rw = Math.round(W * 0.34), rh = Math.round(W * 0.085), rf = Math.round(rh * 0.5);
+    layers.push({ input: Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${rw}" height="${rh}"><rect width="${rw}" height="${rh}" rx="${rh / 2}" fill="#e11d2e"/><text x="${rw / 2}" y="${rh * 0.68}" font-size="${rf}" font-weight="800" text-anchor="middle" fill="#fff" font-family="${esc(FONT)}">${esc(ribbon)}</text></svg>`), left: cx + Math.round(W * 0.02), top: cy + Math.round(W * 0.02) });
+  }
   const buffer = await sharp(Buffer.from(bg)).composite(layers).png().toBuffer();
   return { buffer, width: W, height: H, meta: { layout: 'card', productScaledTo: { w: pw, h: phh }, productModified: false, rotate: rot, zoom: z, cropped: z > 1 } };
 }
