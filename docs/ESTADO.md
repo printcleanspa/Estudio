@@ -2,7 +2,7 @@
 
 **Cambio vigente:** se eliminó OpenAI. Todo es gratuito y local (composición local, Ollama, Stable Diffusion WebUI). No hay servicios de pago.
 
-## Funciona y está probado (16 pruebas automáticas, incluido navegador real)
+## Funciona y está probado (18 pruebas automáticas, incluido navegador real)
 - Autenticación (registro del primer admin, login, logout, usuarios adicionales, límite de intentos).
 - Marcas: crear/editar, colores, tipografías, estilo, redes, datos comerciales. Marca inicial Print Clean SPA vacía de datos inventados.
 - Logo oficial: carga con variantes, guardado sin modificar (SHA-256 verificado), confirmación para borrar.
@@ -30,3 +30,4 @@
 - Una sola organización (usuarios comparten todas las marcas).
 - **Imagen con Ollama es experimental**: según la documentación de Ollama (enero 2026) nació en macOS, con Windows/Linux «próximamente». El formato de respuesta usado (`/api/generate`, imagen en la última línea) proviene de documentación de terceros, no oficial; puede cambiar. Si no funciona en su sistema, use Stable Diffusion o la composición local.
 - Los modelos de IA locales tienen licencias propias (algunos sin uso comercial) y la calidad depende de su equipo.
+- **Ollama real aún sin probar:** la CLI no pudo instalarse en el entorno de desarrollo (la red bloquea ollama.com) ni hay GPU. Lo verificado es contra un servidor simulado; la primera prueba real es `npm run check:ollama` en su equipo.

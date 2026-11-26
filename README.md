@@ -25,6 +25,8 @@ La primera vez, la pantalla pide crear la cuenta de administrador. Se crea la ma
 | **Ollama** | Asistente de textos (puede mirar la foto con un modelo de visión). Imagen: *experimental* | Instale Ollama (ollama.com) y un modelo: `ollama pull <modelo>` |
 | Stable Diffusion WebUI | Imagen desde texto / variación de foto | Inícielo con `--api` y defina `SD_WEBUI_URL` en `.env` |
 
+**Guía paso a paso para Ollama (PC sin GPU, solo local): [docs/OLLAMA.md](docs/OLLAMA.md)** — compruebe su instalación con `npm run check:ollama`.
+
 Si Ollama o Stable Diffusion no están, la plataforma funciona igual con la composición local. La pantalla **Conectores** muestra el estado real de cada motor.
 Los modelos de IA tienen licencias distintas: algunos no permiten uso comercial. Revise la ficha de cada modelo antes de publicar.
 
@@ -38,7 +40,7 @@ Los modelos de IA tienen licencias distintas: algunos no permiten uso comercial.
 ## Pruebas
 
 ```bash
-npm test                                   # API (14 pruebas) + navegador real (2) si Playwright está disponible
+npm test                                   # API (16 pruebas) + navegador real (2) si Playwright está disponible
 ```
 
 ## Seguridad

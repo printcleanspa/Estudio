@@ -46,7 +46,7 @@ async function chat({ env = process.env, model, system, prompt, images = [], for
   const messages = [];
   if (system) messages.push({ role: 'system', content: system });
   messages.push({ role: 'user', content: prompt, ...(images.length ? { images: images.map((b) => b.toString('base64')) } : {}) });
-  const data = JSON.parse(await request(env, '/api/chat', { body: { model, messages, stream: false, ...(format ? { format } : {}), options: { temperature: 0.6 } }, timeout: 180000 }));
+  const data = JSON.parse(await request(env, '/api/chat', { body: { model, messages, stream: false, ...(format ? { format } : {}), options: { temperature: 0.6 } }, timeout: Number(env.OLLAMA_TIMEOUT_MS) || 300000 }));
   const content = data?.message?.content;
   if (typeof content !== 'string') throw httpErr(502, 'Ollama no devolvió texto.');
   return content;
@@ -77,8 +77,8 @@ module.exports = {
   async status(env) {
     try {
       const m = await models(env);
-      return { configured: true, host: hostOf(env), models: m, note: m.length ? `Conectado a ${hostOf(env)}. ${m.length} modelo(s) instalado(s).` : `Conectado a ${hostOf(env)}, pero no hay modelos instalados. Ejecute: ollama pull <modelo>` };
-    } catch (e) { return { configured: false, host: hostOf(env), models: [], note: e.message }; }
+      return { configured: true, host: hostOf(env), models: m, defaults: { text: env.OLLAMA_TEXT_MODEL || null }, note: m.length ? `Conectado a ${hostOf(env)}. ${m.length} modelo(s) instalado(s).` : `Conectado a ${hostOf(env)}, pero no hay modelos instalados. Ejecute: ollama pull <modelo>` };
+    } catch (e) { return { configured: false, host: hostOf(env), models: [], defaults: { text: null }, note: e.message }; }
   },
   info: { cost: 'Gratis. Se ejecuta en su propio equipo (usa su CPU/GPU/memoria).', limits: 'Los define su hardware. La imagen es experimental en Ollama. Cada modelo tiene su propia licencia.', docs: 'https://ollama.com' },
   models, chat, generateImage,

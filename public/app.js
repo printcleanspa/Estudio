@@ -168,7 +168,7 @@ async function pImages() {
   const models = oll.models || [];
   const textModels = models.filter((m) => !IMG_MODEL_RE.test(m.name)), imgModels = models.filter((m) => IMG_MODEL_RE.test(m.name));
   const st = { provider: 'local-compose', src: null, last: null };
-  const modelSel = (id, list) => h('select', { id }, list.length ? list.map((m) => h('option', { value: m.name }, m.name)) : [h('option', { value: '' }, 'No hay modelos instalados')]);
+  const modelSel = (id, list, pref) => h('select', { id, value: list.some((m) => m.name === pref) ? pref : undefined }, list.length ? list.map((m) => h('option', { value: m.name }, m.name)) : [h('option', { value: '' }, 'No hay modelos instalados')]);
 
   const srcBox = h('div'); const out = h('div');
   async function pick() { const a = await pickAsset({ kinds: ['product', 'photo', 'material', 'other', 'logo', 'generated'], brandId: null, title: 'Foto original' }); if (a) { st.src = a; drawSrc(); } }
@@ -184,7 +184,7 @@ async function pImages() {
   // --- asistente de textos (Ollama) ---
   const suggestOut = h('div');
   const aiNotes = h('textarea', { id: 'ai-notes', placeholder: 'Lo que usted sabe del producto: nombre, uso, para quién… (la IA no inventará precios ni características)' });
-  const aiModel = modelSel('ai-model', textModels.length ? textModels : models); const aiImg = h('input', { type: 'checkbox', id: 'ai-img' });
+  const aiModel = modelSel('ai-model', textModels.length ? textModels : models, oll.defaults?.text); const aiImg = h('input', { type: 'checkbox', id: 'ai-img' });
   async function suggest() {
     suggestOut.replaceChildren(h('p', { class: 'muted small' }, 'Pensando… (depende de su equipo)'));
     try {
@@ -197,7 +197,7 @@ async function pImages() {
   const assistant = oll.configured
     ? h('details', { style: { marginTop: '12px' }, open: true }, h('summary', { style: { cursor: 'pointer', fontWeight: 600 } }, 'Asistente de textos (Ollama, gratis y local)'),
       h('label', {}, 'Notas del producto'), aiNotes, h('label', {}, 'Modelo'), aiModel,
-      h('label', { class: 'row', style: { fontWeight: 400 } }, aiImg, 'Que la IA mire la foto (solo modelos con visión, ej. llava)'),
+      h('label', { class: 'row', style: { fontWeight: 400 } }, aiImg, 'Que la IA mire la foto (solo modelos con visión, ej. gemma4)'),
       h('div', { style: { marginTop: '8px' } }, h('button', { class: 'btn', id: 'ai-go', onclick: suggest }, 'Sugerir textos')), suggestOut)
     : h('div', { class: 'note', style: { marginTop: '12px' } }, `Asistente de textos no disponible: ${oll.note} Vea Conectores para instalarlo (gratis).`);
 
@@ -328,7 +328,7 @@ async function pLibrary() {
 
 // ----- Conectores -----
 const HOWTO = {
-  ollama: ['1. Instale Ollama desde ollama.com (gratis) e inícielo.', '2. Descargue un modelo de texto, p. ej.: ollama pull <modelo>   (para ver fotos use un modelo con visión).', '3. Recargue esta página: aparecerán los modelos instalados.', 'Imágenes con Ollama es EXPERIMENTAL (hoy nació en macOS). Si no está disponible en su sistema, use Stable Diffusion.'],
+  ollama: ['1. Instale Ollama (gratis): app en ollama.com/download, o en PowerShell: irm https://ollama.com/install.ps1 | iex', '2. Descargue el modelo recomendado para PC sin GPU (texto + imágenes): ollama pull gemma4:e2b', '3. Compruebe que todo responda: npm run check:ollama. Luego recargue esta página.', 'Imágenes con Ollama es EXPERIMENTAL (hoy nació en macOS). Si no está disponible en su sistema, use Stable Diffusion.'],
   'sd-webui': ['1. Instale Stable Diffusion WebUI (AUTOMATIC1111, Forge o SD.Next) e inícielo con la opción --api.', '2. Defina en .env: SD_WEBUI_URL=http://127.0.0.1:7860', '3. Reinicie Estudio Creativo IA. Requiere GPU para velocidad razonable.'],
 };
 const COMPARE = [

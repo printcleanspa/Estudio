@@ -242,3 +242,27 @@ test('sin Ollama ni Stable Diffusion: la plataforma sigue funcionando y los erro
   assert.equal((await call('GET', '/api/dashboard')).status, 200);
   app2.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test('comprobador npm run check:ollama: éxito con Ollama simulado y guía de instalación si no está', async () => {
+  const { execFile } = require('node:child_process');
+  const run = (envv) => new Promise((resolve) => execFile(process.execPath, ['--disable-warning=ExperimentalWarning', path.join(__dirname, '..', 'scripts', 'check-ollama.js')], { env: { PATH: process.env.PATH, ...envv }, timeout: 30000 }, (err, stdout, stderr) => resolve({ code: err ? err.code : 0, out: stdout + stderr })));
+  const u = `http://127.0.0.1:${stub.address().port}`;
+  const ok = await run({ OLLAMA_HOST: u, OLLAMA_TEXT_MODEL: 'llama-test:latest' });
+  assert.equal(ok.code, 0, ok.out); assert.match(ok.out, /Ollama responde/); assert.match(ok.out, /Respondió en/); assert.match(ok.out, /Todo listo/);
+  const noModel = await run({ OLLAMA_HOST: u, OLLAMA_TEXT_MODEL: 'otro-modelo' });
+  assert.equal(noModel.code, 1); assert.match(noModel.out, /ollama pull otro-modelo/);
+  const down = await run({ OLLAMA_HOST: '127.0.0.1:1' });
+  assert.equal(down.code, 1); assert.match(down.out, /install\.ps1/); assert.match(down.out, /install\.sh/);
+});
+
+test('el estado de Ollama expone el modelo por defecto configurado', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'estudio-def-'));
+  const u = `http://127.0.0.1:${stub.address().port}`;
+  const s3 = http.createServer(createApp({ dataDir: dir, env: { OLLAMA_HOST: u, OLLAMA_TEXT_MODEL: 'llama-test:latest' } })); await new Promise((r) => s3.listen(0, r));
+  const h3 = `http://127.0.0.1:${s3.address().port}`; let ck = '';
+  const call = async (m, p, b) => { const r = await fetch(h3 + p, { method: m, headers: { cookie: ck, 'content-type': 'application/json' }, body: b && JSON.stringify(b) }); const sc = r.headers.get('set-cookie'); if (sc) ck = sc.split(';')[0]; return r.json(); };
+  await call('POST', '/api/auth/register', { email: 'a@b.cl', password: 'clavesegura123' });
+  const o = (await call('GET', '/api/connectors')).active.find((x) => x.id === 'ollama');
+  assert.equal(o.defaults.text, 'llama-test:latest');
+  s3.close(); fs.rmSync(dir, { recursive: true, force: true });
+});

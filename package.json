@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node --disable-warning=ExperimentalWarning server/index.js",
     "test": "node --disable-warning=ExperimentalWarning --test tests/api.test.js tests/e2e.test.js",
+    "check:ollama": "node --disable-warning=ExperimentalWarning scripts/check-ollama.js",
     "backup": "node --disable-warning=ExperimentalWarning scripts/backup.js"
   },
   "engines": { "node": ">=22.5" },
