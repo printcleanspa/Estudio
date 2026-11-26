@@ -1,0 +1,20 @@
+{
+  "name": "estudio-creativo-ia",
+  "version": "0.1.0",
+  "description": "Estudio Creativo IA - plataforma de producción de contenido digital (Fase 1)",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning server/index.js",
+    "test": "node --disable-warning=ExperimentalWarning --test tests/api.test.js tests/e2e.test.js",
+    "backup": "node --disable-warning=ExperimentalWarning scripts/backup.js"
+  },
+  "engines": { "node": ">=22.5" },
+  "license": "UNLICENSED",
+  "private": true,
+  "dependencies": {
+    "express": "^5.1.0",
+    "multer": "^2.0.0",
+    "pdfkit": "^0.17.0",
+    "sharp": "^0.34.0"
+  }
+}
