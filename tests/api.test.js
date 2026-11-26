@@ -154,6 +154,21 @@ test('Tarjeta Print Clean: tamaño exacto, banda con WhatsApp e Instagram de la 
   assert.equal((await mk({ line: 'suministros' })).data.meta.line, 'suministros');
 });
 
+test('Producto recortado: logo, medallón de precio y banda; el producto no se altera', async () => {
+  const disc = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400"><ellipse cx="200" cy="200" rx="200" ry="200" fill="#c81e1e"/></svg>');   // producto redondo: sus esquinas son transparentes
+  const framed = await sharp({ create: { width: 700, height: 700, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } }).composite([{ input: await sharp(disc).png().toBuffer(), left: 150, top: 150 }]).png().toBuffer();
+  const up = await upload(framed, { kind: 'product', brand_id: brand.id, name: 'recortado' });
+  const g = await api('POST', '/api/images/generate', { brand_id: brand.id, provider: 'local-compose', layout: 'cutout', source_asset_id: up.data.id, format: 'ig-4x5', headline: '¿Se te acabó el tóner?', subline: 'Texto de apoyo', badge_top: 'Pack', badge_main: '$15.900', use_logo: true, use_whatsapp: true, line: 'suministros' });
+  assert.equal(g.status, 200, JSON.stringify(g.data)); assert.equal(g.data.width, 1080); assert.equal(g.data.height, 1350);
+  assert.equal(g.data.meta.layout, 'cutout'); assert.equal(g.data.meta.badge, '$15.900'); assert.equal(g.data.meta.productModified, false);
+  const raw = await sharp(Buffer.from(await (await api('GET', `/files/${g.data.id}`, null, { raw: true })).arrayBuffer())).raw().toBuffer({ resolveWithObject: true });
+  const px = (x, y) => [...raw.data.slice((y * raw.info.width + x) * raw.info.channels, (y * raw.info.width + x) * raw.info.channels + 3)];
+  let gris = 0; for (let i = 0; i < raw.data.length; i += raw.info.channels) { const [r, gg, bb] = [raw.data[i], raw.data[i + 1], raw.data[i + 2]]; if (Math.abs(r - 122) < 22 && Math.abs(gg - 140) < 22 && Math.abs(bb - 168) < 22) gris++; }
+  assert.ok(gris / (raw.info.width * raw.info.height) < 0.01, 'no hay un rectángulo gris detrás del producto: la sombra sigue su silueta');
+  let rojo = 0; for (let i = 0; i < raw.data.length; i += raw.info.channels) if (raw.data[i] > 170 && raw.data[i + 1] < 70 && raw.data[i + 2] < 70) rojo++;
+  assert.ok(rojo > 50000, 'el producto conserva su color real');
+});
+
 test('aprobación de imagen generada y validaciones', async () => {
   const gen = (await api('GET', '/api/assets?kind=generated')).data[0];
   assert.equal((await api('PATCH', `/api/assets/${gen.id}`, { status: 'approved' })).data.status, 'approved');

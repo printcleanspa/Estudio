@@ -8,7 +8,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const ffmpeg = require('./connectors/ffmpeg');
-const { compose, composeCard } = require('./connectors/local-compose');
+const { compose, composeCard, composeCutout } = require('./connectors/local-compose');
 
 const httpErr = (status, message) => Object.assign(new Error(message), { status });
 const VIDEO_FORMATS = {
@@ -50,7 +50,9 @@ async function renderVideo(p) {
     const frames = [];
     for (let i = 0; i < n; i++) {
       const s = p.scenes[i];
-      const r = p.style.card
+      const r = p.style.card && p.style.card.mode === 'cutout'
+        ? await composeCutout({ width: W, height: H, cutoutBuffer: s.buffer, logoBuffer: p.style.logoBuffer, headline: s.caption || '', subline: s.subcaption || '', badgeTop: s.badgeTop, badgeMain: s.badgeMain, footerLines: s.hideFooter ? [] : p.style.card.footerLines, palette: p.style.card.palette })
+        : p.style.card
         ? await composeCard({ width: W, height: H, photoBuffer: s.buffer, logoBuffer: p.style.logoBuffer, headline: s.caption || '', subline: s.subcaption || '', footerLines: p.style.card.footerLines, palette: p.style.card.palette, rotate: s.rotate, zoom: s.zoom, fx: s.fx, fy: s.fy })
         : await compose({ width: W, height: H, productBuffer: s.buffer, logoBuffer: p.style.logoBuffer, bg: p.style.bg, headline: s.caption || '', subline: '', footer: p.style.footer || '', textColor: p.style.textColor, font: p.style.font, layout: s.caption ? 'text-bottom' : 'center' });
       const f = path.join(tmp, `scene-${i}.png`); fs.writeFileSync(f, r.buffer); frames.push(f);
@@ -68,7 +70,7 @@ async function renderVideo(p) {
     for (let i = 0; i < n; i++) {
       const frames30 = Math.round(p.scenes[i].seconds * FPS);
       f.push(p.motion
-        ? `[${i}:v]scale=${W * 2}:${H * 2},zoompan=z='min(1+0.0007*on,1.12)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:s=${W}x${H}:fps=${FPS},format=yuv420p,setsar=1[v${i}]`
+        ? `[${i}:v]scale=${W * 2}:${H * 2},zoompan=z='min(1+0.0004*on,${p.style.card ? 1.035 : 1.12})':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:s=${W}x${H}:fps=${FPS},format=yuv420p,setsar=1[v${i}]`
         : `[${i}:v]scale=${W}:${H},fps=${FPS},format=yuv420p,setsar=1[v${i}]`);
       void frames30;
     }

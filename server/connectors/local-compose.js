@@ -146,9 +146,76 @@ async function composeCard({ width: W, height: H, photoBuffer, logoBuffer, headl
   return { buffer, width: W, height: H, meta: { layout: 'card', productScaledTo: { w: pw, h: phh }, productModified: false, rotate: rot, zoom: z, cropped: z > 1 } };
 }
 
+/**
+ * Estilo «Producto recortado» (como las imágenes terminadas de Print Clean): logo, título, el producto YA RECORTADO (PNG con transparencia)
+ * grande y con sombra, medallón de precio y banda inferior con WhatsApp / Instagram. No inventa nada: solo coloca lo que se le entrega.
+ */
+async function alphaBBox(buf) {
+  const { data, info } = await sharp(buf).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  let x0 = info.width, y0 = info.height, x1 = 0, y1 = 0;
+  for (let y = 0; y < info.height; y++) for (let x = 0; x < info.width; x++) if (data[(y * info.width + x) * 4 + 3] > 20) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+  return x1 > x0 ? { left: x0, top: y0, width: x1 - x0 + 1, height: y1 - y0 + 1 } : null;
+}
+async function composeCutout({ width: W, height: H, cutoutBuffer, logoBuffer, headline, subline, badgeTop, badgeMain, footerLines, palette, scale = 1 }) {
+  const navy = palette?.navy || '#023473', sky = palette?.sky || '#96dcfe';
+  const m = Math.round(W * 0.045); const layers = [];
+  const bg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${esc(sky)}"/><stop offset="0.6" stop-color="#d9f1fe"/><stop offset="1" stop-color="#ffffff"/></linearGradient></defs>
+    <rect width="100%" height="100%" fill="url(#g)"/>
+    <path d="M0 ${H * 0.22} C ${W * 0.3} ${H * 0.14}, ${W * 0.55} ${H * 0.32}, ${W} ${H * 0.22} L ${W} ${H * 0.5} C ${W * 0.6} ${H * 0.4}, ${W * 0.3} ${H * 0.57}, 0 ${H * 0.47} Z" fill="#ffffff" opacity="0.3"/>
+    <path d="M0 ${H * 0.66} C ${W * 0.35} ${H * 0.56}, ${W * 0.6} ${H * 0.78}, ${W} ${H * 0.64} L ${W} ${H} L 0 ${H} Z" fill="#ffffff" opacity="0.4"/></svg>`;
+  // cabecera
+  const logoSize = Math.round(W * 0.19); let headerBottom = m;
+  if (logoBuffer) {
+    const circle = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${logoSize}" height="${logoSize}"><circle cx="${logoSize / 2}" cy="${logoSize / 2}" r="${logoSize / 2}" fill="#fff"/></svg>`);
+    layers.push({ input: await sharp(logoBuffer).resize(logoSize, logoSize, { fit: 'cover' }).composite([{ input: circle, blend: 'dest-in' }]).png().toBuffer(), left: m, top: m }); headerBottom = m + logoSize;
+  }
+  const tx = logoBuffer ? m + logoSize + Math.round(W * 0.035) : m, tw = W - m - tx;
+  const fs1 = Math.round(W * 0.075), fs2 = Math.round(W * 0.03);
+  const l1 = wrap(headline || '', Math.max(8, Math.floor(tw / (fs1 * 0.58)))).slice(0, 3), l2 = wrap(subline || '', Math.max(14, Math.floor(tw / (fs2 * 0.55)))).slice(0, 3);
+  const blockH = l1.length * fs1 * 1.12 + (l2.length ? l2.length * fs2 * 1.3 + fs2 * 0.5 : 0);
+  let ty = Math.max(m + fs1 * 0.92, (logoBuffer ? m + logoSize / 2 - blockH / 2 : m) + fs1 * 0.92), txt = '';
+  for (const l of l1) { txt += `<text x="${tx}" y="${ty}" font-size="${fs1}" font-weight="800" fill="${esc(navy)}" font-family="${esc(FONT)}">${esc(l)}</text>`; ty += fs1 * 1.12; }
+  ty += fs2 * 0.3;
+  for (const l of l2) { txt += `<text x="${tx}" y="${ty}" font-size="${fs2}" font-weight="600" fill="${esc(navy)}" opacity="0.88" font-family="${esc(FONT)}">${esc(l)}</text>`; ty += fs2 * 1.3; }
+  headerBottom = Math.max(headerBottom, ty);
+  // banda inferior
+  let bandTop = H - m;
+  const lines = (footerLines || []).filter(Boolean);
+  if (lines.length) {
+    const sizes = lines.map((_, i) => Math.round(W * (i === 1 ? 0.058 : 0.033))); const bh = Math.round(sizes.reduce((a, b) => a + b * 1.3, 0) + W * 0.05), by = H - m - bh;
+    let yy = by + W * 0.028, t = '';
+    lines.forEach((ln, i) => { yy += sizes[i] * 1.02; t += `<text x="${W / 2}" y="${yy}" font-size="${sizes[i]}" font-weight="${i === 1 ? 800 : 700}" text-anchor="middle" fill="#fff" font-family="${esc(FONT)}">${esc(ln)}</text>`; yy += sizes[i] * 0.28; });
+    txt += `<rect x="${m}" y="${by}" width="${W - 2 * m}" height="${bh}" rx="${Math.round(W * 0.045)}" fill="${esc(navy)}"/>` + t; bandTop = by;
+  }
+  // producto recortado: se recorta a su caja real, se escala para caber y se le pone sombra
+  const box = await alphaBBox(cutoutBuffer);
+  const prod = box ? await sharp(cutoutBuffer).extract(box).toBuffer() : cutoutBuffer;
+  const gap = Math.round(H * 0.02), boxY = Math.round(headerBottom + gap), boxH = Math.round(bandTop - gap - boxY), boxW = Math.round(W - 2 * m);
+  const pr = await sharp(prod).resize(Math.round(boxW * scale), Math.round(boxH * scale), { fit: 'inside' }).png().toBuffer({ resolveWithObject: true });
+  const pw = pr.info.width, ph = pr.info.height, px = Math.round((W - pw) / 2), py = boxY + Math.round((boxH - ph) / 2);
+  // sombra: misma silueta del producto (canal alfa), azul oscuro, desenfocada y semitransparente
+  const alpha = await sharp(pr.data).ensureAlpha().extractChannel(3).raw().toBuffer();
+  const sh = await sharp({ create: { width: pw, height: ph, channels: 3, background: { r: 0, g: 25, b: 70 } } }).joinChannel(alpha, { raw: { width: pw, height: ph, channels: 1 } }).png().toBuffer();
+  const pad = Math.round(W * 0.04);
+  const shadow = await sharp(sh).extend({ top: pad, bottom: pad, left: pad, right: pad, background: { r: 0, g: 25, b: 70, alpha: 0 } }).blur(Math.max(8, Math.round(W * 0.016))).linear([1, 1, 1, 0.42], [0, 0, 0, 0]).png().toBuffer();
+  layers.push({ input: Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">${txt}</svg>`), left: 0, top: 0 });
+  layers.push({ input: shadow, left: px - pad + Math.round(W * 0.008), top: py - pad + Math.round(W * 0.022) }, { input: pr.data, left: px, top: py });
+  // medallón de precio / dato destacado (solo si se entrega)
+  if (badgeMain) {
+    const d = Math.round(W * 0.25), bx = W - m - d + Math.round(W * 0.012), by2 = Math.round(Math.min(bandTop - gap - d * 0.92, py + ph - d * 0.5));
+    const f1 = Math.round(d * 0.17), f2 = Math.round(d * Math.min(0.27, 1.25 / String(badgeMain).length));
+    const circ = `<svg xmlns="http://www.w3.org/2000/svg" width="${d}" height="${d}"><circle cx="${d / 2}" cy="${d / 2}" r="${d / 2 - 4}" fill="${esc(navy)}" stroke="#ffffff" stroke-width="8"/>
+      ${badgeTop ? `<text x="${d / 2}" y="${d * 0.36}" font-size="${f1}" font-weight="700" text-anchor="middle" fill="#fff" font-family="${esc(FONT)}">${esc(badgeTop)}</text>` : ''}
+      <text x="${d / 2}" y="${badgeTop ? d * 0.64 : d * 0.57}" font-size="${f2}" font-weight="800" text-anchor="middle" fill="#fff" font-family="${esc(FONT)}">${esc(badgeMain)}</text></svg>`;
+    layers.push({ input: Buffer.from(circ), left: Math.round(bx), top: by2 });
+  }
+  const buffer = await sharp(Buffer.from(bg)).composite(layers).png().toBuffer();
+  return { buffer, width: W, height: H, meta: { layout: 'cutout', productModified: false, background_removed: true } };
+}
+
 module.exports = {
   id: 'local-compose', label: 'Composición local (sharp)', category: 'Imágenes', paid: false,
   status: () => ({ configured: true, note: 'Siempre disponible. Procesamiento local, sin costo.' }),
   info: { cost: 'Gratis (procesa en su servidor)', limits: 'Sin límites externos. No genera imágenes nuevas ni quita fondos: conserva la foto original del producto.', docs: 'https://sharp.pixelplumbing.com/' },
-  compose, composeCard,
+  compose, composeCard, composeCutout,
 };

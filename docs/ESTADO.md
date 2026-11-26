@@ -45,3 +45,8 @@
 Se generaron 3 posts 4:5, 1 historia 9:16 y 1 Reel de 9 s con fotos del celular de Michael (Drive), el Logo B oficial y sus datos, con la plantilla **Tarjeta Print Clean** (fondo celeste, logo redondo, foto real en tarjeta, banda azul con WhatsApp e Instagram de la línea).
 - Funciona bien con fotos de buena toma (resmas, sacasarro). Girar y acercar el encuadre no altera el producto.
 - **Límite claro:** Estudio NO recorta el fondo. Con fotos de piso/pared/bodega el resultado es correcto pero no llega al nivel de «Limpia pisos» (producto recortado + ilustraciones). Para ese nivel falta recorte de fondo (ej. rembg, gratis y local, pero necesita Python y descargar un modelo) o fotos con fondo limpio.
+
+## 26 nov (tarde) — Producto recortado
+- Nuevo estilo **Producto recortado** (`layout: cutout`): logo, título, producto con sombra, medallón de precio, banda con WhatsApp e Instagram de la línea. Funciona en posts, historias y Reels.
+- Recorte de fondo gratis y local: `scripts/cutout.py` (OpenCV GrabCut; sin modelos). Se probó con 2 fotos reales del celular de Michael con buen resultado. Requiere Python + `pip install opencv-python-headless numpy pillow`, y un rectángulo que encierre el producto. **Aún no está conectado a la pantalla** (hoy se ejecuta por línea de comandos).
+- El precio del medallón lo escribe el usuario; en la muestra se usó $15.900 de la ficha del pack (pendiente de confirmar IVA/stock).
